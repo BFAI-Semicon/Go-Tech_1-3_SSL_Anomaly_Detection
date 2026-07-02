@@ -1,0 +1,22 @@
+# DGX Spark (aarch64 / GB10 Grace Blackwell, CUDA 13) 上の開発環境定義。
+# takt-sdd の git-worktree でも `mise install` でこの環境を再現できる。
+
+[tools]
+python = "3.12"   # torch cu130 の aarch64 wheel (cp312) が提供されており DGX Spark に最適
+uv = "latest"     # 依存解決・venv 管理
+
+[env]
+# リポジトリ直下に .venv を自動生成・有効化する（uv sync もこの .venv を使う）
+_.python.venv = { path = ".venv", create = true }
+
+[tasks.sync]
+description = "依存を同期 (cu130 / DINOv3対応 anomalib + LLMクライアント)"
+run = "uv sync --extra llm"
+
+[tasks.sync-dev]
+description = "開発用依存も含めて同期"
+run = "uv sync --extra llm --extra dev"
+
+[tasks.gpu-check]
+description = "PyTorch から CUDA(Blackwell) が見えるか確認"
+run = "python -c \"import torch; print('torch', torch.__version__); print('cuda', torch.cuda.is_available(), torch.cuda.get_device_name(0) if torch.cuda.is_available() else '-')\""
