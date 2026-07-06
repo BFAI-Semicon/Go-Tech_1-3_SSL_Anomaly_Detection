@@ -1,0 +1,33 @@
+---
+description: Markdown のフェンスコードブロックには必ず言語を指定する (markdownlint MD040)
+globs: **/*.md,**/*.mdc
+alwaysApply: false
+---
+
+# Markdown コードフェンスの言語指定
+
+Markdown で ``` を使うときは、開始フェンスに必ず言語名を付けること（markdownlint MD040 対応）。
+
+- コマンド/シェル → `bash`
+- 出力・ディレクトリ構成・プレーンテキスト → `text`
+- 該当する言語があれば正しい識別子を使う（`python`, `toml`, `yaml`, `json`, `dockerfile` など）
+
+## 例
+
+````text
+# ❌ BAD: 言語指定なし
+```
+some output
+```
+
+# ✅ GOOD: 言語を指定
+```bash
+mise run sync
+```
+
+```text
+.
+├── README.md
+└── mise.toml
+```
+````
