@@ -112,15 +112,18 @@ Blue-Green 型のアーティファクト昇格モデルを採用する。
   - `meta.json` / `priority.json` / スナップショットは再生成・現行形式への書き直しが可能なため、
     構造版は不要（旧形式を保持する運用に変える場合のみ再検討）。
 
-### 3.1 削除の表現：論理削除フラグではなく `NoOverride`
+### 3.1 削除の表現：論理削除フラグではなく `Retire`
 
 - 削除フラグ（tombstone）は持たない。
-- 削除は「そのドメインの最新版に **`judgment: "NoOverride"`（一次判定を上書きしない）** を意味するレコードを追記」して表現する。
+- 削除は「そのドメインの最新版に **`judgment: "Retire"`（この要素を廃止する）** を意味するレコードを追記」して表現する。
 - 有効集合の解決は「各 `element_id` について最新 `revision` の `judgment` を適用」で一様。
-- **「何もしない ≡ 削除」を厳密にするため、コンパクション時に「最新が `NoOverride` の要素」は有効スナップショットのリストから除外する**（ログには履歴として残す）。これにより他要素との優先順位解決で真の削除と挙動が一致する。
+- **「廃止 ≡ 削除」を厳密にするため、コンパクション時に「最新が `Retire` の要素」は有効スナップショットのリストから除外する**（ログには履歴として残す）。除外されるので他ルールを遮蔽せず、重なる広域ルールがあればそれにフォールバックする（＝真の削除と一致）。
 - 意味は「今後の廃止（deprecation）」であり「過去の撤回（retraction）」ではない。誤登録の由来
   （`retired` 等）は独立監査ログに記録する（レコード本体には持たない。履歴は改変しない）。
 - 再有効化は、実 `judgment` を持つ新 `revision` を追記すれば可能。
+- **`Retire`（削除）と `KeepPrimary`（一次判定を保つ能動マスク）は別物**。`Retire` はコンパクションで
+  除外され広域ルールにフォールバックするが、`KeepPrimary` は有効集合に残り specificity（§9.1）で
+  広域ルールを遮蔽する。両者は「一次判定が通る」点で似るが、重なる広域ルールがある時に挙動が逆になる（§6.1）。
 
 ## 4. ドメイン単位のバージョン管理
 
@@ -293,23 +296,30 @@ CURIE（`prefix:LocalName`）を実 IRI に展開する対応表。使うのは 
 
 ### 6.1 `judgment`（判定＝二次判定の効果方向）
 
-| 値                 | 一次 → 二次         | 意味                                     | 旧称   |
-| ------------------ | ------------------- | ---------------------------------------- | ------ |
-| `OverrideNegative` | Positive → Negative | 過検出抑制（既知の許容パターン）         | 許容   |
-| `OverridePositive` | Negative → Positive | 見逃し救済（エスカレーション）           | 不許容 |
-| `ReviewRequired`   | 任意 → 保留         | 人間へエスカレーション                   | 要確認 |
-| `NoOverride`       | 変更なし            | 補正を放棄し一次判定を維持（＝削除表現） | (削除) |
+| 値                 | 一次 → 二次         | 意味                                                   | コンパクション | 広域ルールへの作用 |
+| ------------------ | ------------------- | ------------------------------------------------------ | -------------- | ------------------ |
+| `OverrideNegative` | Positive → Negative | 過検出抑制（既知の許容パターン）                       | 残す           | 具体なら勝つ       |
+| `OverridePositive` | Negative → Positive | 見逃し救済（エスカレーション）                         | 残す           | 具体なら勝つ       |
+| `KeepPrimary`      | 変更なし            | 補正せず一次判定を保つ**能動マスク**（広域補正を遮蔽） | 残す           | specificity で遮蔽 |
+| `ReviewRequired`   | 任意 → 保留         | 人間へエスカレーション                                 | 残す           | 具体なら勝つ       |
+| `Retire`           | —                   | この要素を**廃止**（削除表現。旧 `NoOverride`）        | **除外**       | フォールバック     |
+
+- **`KeepPrimary` と `Retire` の違い**：どちらも局所的には一次判定が通るが、重なる広域ルールがある時に
+  逆の挙動になる。`KeepPrimary` は残って広域を遮蔽（能動マスク）、`Retire` は消えて広域にフォールバック（削除）。
+- **広域と異なる補正**をしたいだけなら、新しい値は不要で、具体ドメインに `OverrideNegative` /
+  `OverridePositive`（具体値）を置けば specificity（§9.1）で広域に勝つ。`KeepPrimary` は「広域補正を
+  効かせず一次判定に戻す」専用。
 
 ### 6.2 `method`（補正方式）※ `judgment` と別軸
 
 `researches.md` §5 の 3 方式比較に対応。
 
-| 値               | 内容                                                 |
-| ---------------- | ---------------------------------------------------- |
-| `LabelOverride`  | ラベルを直接上書き（ハード）                         |
-| `ScoreReweight`  | スコアを重み付けで調整（ソフト、`params.weight`）    |
-| `ThresholdAdapt` | 判定閾値を適応（`params.threshold_delta` 等）        |
-| `null`           | `judgment` が `NoOverride` / `ReviewRequired` のとき |
+| 値               | 内容                                                             |
+| ---------------- | ---------------------------------------------------------------- |
+| `LabelOverride`  | ラベルを直接上書き（ハード）                                     |
+| `ScoreReweight`  | スコアを重み付けで調整（ソフト、`params.weight`）                |
+| `ThresholdAdapt` | 判定閾値を適応（`params.threshold_delta` 等）                    |
+| `null`           | `judgment` が `KeepPrimary` / `Retire` / `ReviewRequired` のとき |
 
 方向（`judgment`）× 方式（`method`）の 2 次元で表現し、`params` に方式ごとのパラメータを持たせる。
 
@@ -411,7 +421,7 @@ versions/
 ```json
 {"ontology_version":"1.2.0","revision":1001,"element_id":"e-8f3a1c","judgment":"OverrideNegative","method":"ScoreReweight","params":{"weight":0.3},"match":{"prototype_ids":["proto-1187","proto-1190"],"similarity_threshold":0.82,"scope":{"defect_class":"proj:PolymerResidue","measurement":"semicont:CriticalDimension"}},"valid_to":"2026-12-01T00:00:00Z","recorded_at":"2026-06-01T09:12:00Z","attributed_to":"op_tanaka","source_ref":"annotation:ann-5521"}
 {"ontology_version":"1.2.0","revision":1005,"element_id":"e-8f3a1c","judgment":"OverrideNegative","method":"ScoreReweight","params":{"weight":0.15},"match":{"prototype_ids":["proto-1187","proto-1190","proto-1203"],"similarity_threshold":0.85,"scope":{"defect_class":"proj:PolymerResidue","measurement":"semicont:CriticalDimension"}},"valid_to":"2026-12-01T00:00:00Z","recorded_at":"2026-06-15T14:03:00Z","attributed_to":"op_tanaka","source_ref":"annotation:ann-5602"}
-{"ontology_version":"1.2.0","revision":1020,"element_id":"e-8f3a1c","judgment":"NoOverride","method":null,"params":{},"match":null,"valid_to":null,"recorded_at":"2026-07-01T08:00:00Z","attributed_to":"op_tanaka","source_ref":"annotation:ann-5988"}
+{"ontology_version":"1.2.0","revision":1020,"element_id":"e-8f3a1c","judgment":"Retire","method":null,"params":{},"match":null,"valid_to":null,"recorded_at":"2026-07-01T08:00:00Z","attributed_to":"op_tanaka","source_ref":"annotation:ann-5988"}
 ```
 
 ### 8.3 稼働系がロードする有効スナップショット（`revision ≤ 1023` の解決結果）
@@ -438,7 +448,7 @@ versions/
 }
 ```
 
-- `e-8f3a1c` は最新（`revision 1020`）が `NoOverride` のため有効集合から除外される（＝真の削除と同じ挙動）。
+- `e-8f3a1c` は最新（`revision 1020`）が `Retire` のため有効集合から除外される（＝真の削除と同じ挙動）。
 - `resolved_at_revision` により、どのバージョンで解決したかを再現できる。
 
 ## 9. 有効スナップショット解決規則（コンパクション）
@@ -446,7 +456,8 @@ versions/
 各ドメインで `revision ≤ active_revision` を対象に以下を適用する。
 
 1. `element_id` ごとに **最新 `revision` のレコード**を採用する。
-2. 最新が `NoOverride` の要素は**除外**する（削除と同義）。
+2. 最新が `Retire` の要素は**除外**する（削除と同義。広域ルールを遮蔽せずフォールバックさせる）。
+   `KeepPrimary` は**除外せず残す**（能動マスクとして §9.1 の specificity 解決に参加し、広域補正を遮蔽する）。
 3. `valid_to` 切れ（expiry）の要素は**除外**する。
 4. **バージョンタプル整合は補正側で取る**（プロトタイプ側を参照有無で除外しない）。メモリバンクの
    プロトタイプは大半がどの補正レコードからも参照されない**正常集合メンバー**であり、一次判定の
@@ -469,8 +480,14 @@ versions/
 
 1. **specificity**：`domain` タプルと `match.scope` がより具体的な方を優先
    （完全指定 > `any` / 上位クラス。§4.2 のドメイン合成規則と同一の考え方）。
-2. **safety rule**：同 specificity なら安全側を優先（`OverridePositive`＝見逃し救済 >
-   `OverrideNegative`＝過検出抑制）。見逃しの方が高コストというポリシーを固定する。
+   - `KeepPrimary` もここに参加する。**具体スコープの `KeepPrimary` は広域の補正（`OverrideNegative` /
+     `OverridePositive`）に勝ち、そのスコープでは補正を遮蔽して一次判定を通す**（能動マスク）。
+   - **安全上の注意**：`KeepPrimary` は specificity で勝つため、広域の `OverridePositive`（見逃し救済）も
+     遮蔽しうる（＝見逃しを再び許容する方向）。運用者の明示意図として尊重するが、救済を消す設定になる
+     点をレビュー時に確認する。
+2. **safety rule**：同 specificity なら安全側を優先。順序は
+   `OverridePositive`（見逃し救済）> `KeepPrimary`（一次判定を保つ）> `OverrideNegative`（過検出抑制）。
+   見逃しの方が高コストというポリシーを固定する（同スコープに相反 `judgment` が併存する矛盾入力時の決定用）。
 3. **recency**：なお同点なら**新しい `recorded_at`（UTC・全ドメイン比較可）を優先**。`revision` は
    ドメインごとに独立採番のためクロスドメイン比較には使わない（同一ドメイン内の補助としてのみ有効）。
 4. **最終タイブレーク**：`element_id` の辞書順（総順序を保証し一意化）。
