@@ -38,6 +38,16 @@ Blue-Green 型のアーティファクト昇格モデルを採用する。
   補正レイヤは両方を同時に参照するため、片方だけ更新するとプロトタイプと適用条件がズレて誤補正になる。
 - 稼働系は **不変バージョンを読み取り専用**で参照するのでロック競合が起きない。
 - 昇格は active ポインタ（マニフェスト）の原子的な差し替えで行う。
+- **版の軸は 2 つで粒度が異なる**（`§2.1` の単一プール前提の帰結）:
+  - **メモリバンク＝グローバル 1 軸**。全ドメイン共有の単一プールなので per-domain の版は持たず、`memory_bank`
+    スナップショット（例 `mb-2026-07-01`）で 1 本管理する（マニフェストが保持。§7.1）。
+  - **構造化 JSON＝per-domain 軸**。各ドメインの `active_revision`（§4）。
+  - よって**バージョンタプル ＝ `(グローバル memory_bank snapshot, 各ドメインの revision)`**。過去状態の
+    完全再現は、マニフェストのこのタプル全体をピン留めして行う。
+- **サイズ制約と切替方式**：全ドメインで同時稼働できるメモリバンクは 1 つだけ（サイズが大きい）。よって
+  プロセス内 Blue-Green（新旧 2 版の同時メモリ保持）は行わず、**メモリはシングルライブ、ディスクは版付き
+  不変アーティファクト**とする。昇格＝候補をビルド・検証後に**バッチ時リロードで差し替え**、ロールバック＝
+  旧アーティファクトの再ロード（反映はバッチのため短時間ダウンタイムは許容）。
 
 ### 2.1 メモリバンク側のプロトタイプモデル（タプルの片側）
 
@@ -115,8 +125,16 @@ Blue-Green 型のアーティファクト昇格モデルを採用する。
 ## 4. ドメイン単位のバージョン管理
 
 - **1 ドメイン = 1 追記ログ（別ファイル）。** `revision` はドメインごとに独立採番。
-- 昇格・ロールバックはドメイン単位（他ドメインに波及しない）。
+- **構造化 JSON の昇格・ロールバックはドメイン単位**（他ドメインに波及しない）。
 - 稼働系は担当ドメインのログだけをロード（ドメイン分割ロード）。
+- **メモリバンクは per-domain 版を持たない（グローバル 1 軸。§2・§2.1）。** ここに粒度の非対称がある:
+  - **per-domain 操作**：あるドメインの構造化 JSON だけを別 `revision` に昇格／ロールバックする。メモリバンク
+    （グローバル snapshot）は据え置き。
+  - **グローバル操作**：メモリバンク snapshot の差し替え／巻き戻しは**全ドメインに波及する**（全ドメインが同じ
+    プールを参照するため）。
+  - **ロールバック整合**：あるドメインの JSON だけ巻き戻しても、`prototype_id` 安定＋tombstone＋§9 規則4
+    （dangling は補正側で remap／非適用）により誤解決しない（該当補正が非適用になるだけ）。ただし「当時の判定を
+    完全再現」するには、その時点の **memory_bank snapshot も併せてピン留め**する必要がある（§2 のタプル）。
 
 ### 4.1 ドメインキーと 4 桁スラッグ
 
@@ -319,9 +337,11 @@ CURIE（`prefix:LocalName`）を実 IRI に展開する対応表。使うのは 
 
 ```text
 versions/
-├── manifest.json                       # 全ドメインの版を束ねる（版付き）
+├── manifest.json                       # バージョンタプルを束ねる（memory_bank + 各ドメイン revision。§7.1）
 ├── ontology_registry.json              # オントロジー定義（版キー：components / prefixes / remap）共通（§5.2）
 ├── priority.json                       # 任意：全体1ファイルの優先順位明示上書き（派生・再生成可能。§9.1）
+├── banks/                              # メモリバンク側の版付き不変アーティファクト（グローバル1軸。§2.1）
+│   └── mb-2026-07-01/                  # FAISS インデックス＋メタデータ層（snapshot_id で参照）
 └── domains/
     ├── drie__sin__plasmaetch__wafer/   # 完全指定ドメイン
     │   ├── meta.json                   # 不変メタ（domain_id / domain のみ。ontology は持たない）
@@ -343,15 +363,24 @@ versions/
 （`domain_id` / `domain`）のみを持つ。したがってマニフェストも各ドメインの `meta.json` も
 `ontology` を持たない（per-domain のオントロジー権威は存在しない）。
 
+マニフェストは**バージョンタプルの両側**を束ねる：グローバルな `memory_bank` スナップショット（§2）と、
+各ドメインの `active_revision`（§4）。`memory_bank` はメモリバンク側（タプルの片側）の権威で、全ドメインが
+共有する単一プールなので 1 つだけ持つ。
+
 ```json
 {
   "manifest_version": 42,
+  "memory_bank": { "snapshot_id": "mb-2026-07-01", "prototype_count": 1284000, "artifact": "banks/mb-2026-07-01/" },
   "domains": [
     { "domain_id": "sha256:3f9a…", "slug": "drie__sin__plasmaetch__wafer", "active_revision": 1023, "log": "domains/drie__sin__plasmaetch__wafer/log.jsonl" },
     { "domain_id": "sha256:7c1e…", "slug": "drie__any__any__wafer",        "active_revision": 1,    "log": "domains/drie__any__any__wafer/log.jsonl" }
   ]
 }
 ```
+
+- `memory_bank.snapshot_id` を差し替えるとメモリバンク側が原子的に切替わる（全ドメインに波及。§4）。
+- 過去状態の完全再現は `(memory_bank.snapshot_id, 各ドメインの active_revision)` のタプル全体で決まる。
+- `banks/<snapshot_id>/` はディスク上の版付き不変アーティファクト（FAISS インデックス＋メタデータ層。§2.1）。
 
 ## 8. JSON サンプル
 
@@ -508,3 +537,8 @@ versions/
   クラス削除・分割（1 対多 remap）の表現。`proj` 版の採番規則（日付／semver）の確定。
 - 「同一 IRI の意味変更」を検知する手段（ontology diff・SHACL 差分・回帰評価の運用）。
 - `ontology_version` の remap 連鎖関数の実装方針（`schema_version` は破壊的変更を行う時点で導入）。
+- メモリバンク版とドメイン版の**粒度非対称**の運用ルール（§2・§4）：`memory_bank` snapshot のロールバックは
+  全ドメインに波及するグローバル操作、per-domain JSON ロールバックは局所操作。両者を混在させたときの
+  承認フロー・評価ゲート（`evaluation-framework`）の当て方、および `banks/` の保持世代数・GC 方針。
+- 分布が大きく乖離するドメインを物理分割（`researches.md §3.3`）する場合の、メモリバンク版軸の扱い
+  （グローバル 1 軸のまま複数索引を内包するか、パーティション別版＋部分スワップにするか）。
