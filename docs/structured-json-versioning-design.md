@@ -115,12 +115,12 @@ Blue-Green 型のアーティファクト昇格モデルを採用する。
 ### 3.1 削除の表現：論理削除フラグではなく `Retire`
 
 - 削除フラグ（tombstone）は持たない。
-- 削除は「そのドメインの最新版に **`judgment: "Retire"`（この要素を廃止する）** を意味するレコードを追記」して表現する。
-- 有効集合の解決は「各 `element_id` について最新 `revision` の `judgment` を適用」で一様。
+- 削除は「そのドメインの最新版に **`action: "Retire"`（この要素を廃止する）** を意味するレコードを追記」して表現する。
+- 有効集合の解決は「各 `element_id` について最新 `revision` の `action` を適用」で一様。
 - **「廃止 ≡ 削除」を厳密にするため、コンパクション時に「最新が `Retire` の要素」は有効スナップショットのリストから除外する**（ログには履歴として残す）。除外されるので他ルールを遮蔽せず、重なる広域ルールがあればそれにフォールバックする（＝真の削除と一致）。
 - 意味は「今後の廃止（deprecation）」であり「過去の撤回（retraction）」ではない。誤登録の由来
   （`retired` 等）は独立監査ログに記録する（レコード本体には持たない。履歴は改変しない）。
-- 再有効化は、実 `judgment` を持つ新 `revision` を追記すれば可能。
+- 再有効化は、実 `action` を持つ新 `revision` を追記すれば可能。
 - **`Retire`（削除）と `KeepPrimary`（一次判定を保つ能動マスク）は別物**。`Retire` はコンパクションで
   除外され広域ルールにフォールバックするが、`KeepPrimary` は有効集合に残り specificity（§9.1）で
   広域ルールを遮蔽する。両者は「一次判定が通る」点で似るが、重なる広域ルールがある時に挙動が逆になる（§6.1）。
@@ -294,7 +294,7 @@ CURIE（`prefix:LocalName`）を実 IRI に展開する対応表。使うのは 
 
 一次判定（Positive=異常候補 / Negative=正常）に対する二次判定の効果を表す。
 
-### 6.1 `judgment`（判定＝二次判定の効果方向）
+### 6.1 `action`（補正操作＝一次判定への効果・ライフサイクル）
 
 | 値                 | 一次 → 二次         | 意味                                                   | コンパクション | 広域ルールへの作用 |
 | ------------------ | ------------------- | ------------------------------------------------------ | -------------- | ------------------ |
@@ -310,7 +310,7 @@ CURIE（`prefix:LocalName`）を実 IRI に展開する対応表。使うのは 
   `OverridePositive`（具体値）を置けば specificity（§9.1）で広域に勝つ。`KeepPrimary` は「広域補正を
   効かせず一次判定に戻す」専用。
 
-### 6.2 `method`（補正方式）※ `judgment` と別軸
+### 6.2 `method`（補正方式）※ `action` と別軸
 
 `researches.md` §5 の 3 方式比較に対応。
 
@@ -319,9 +319,9 @@ CURIE（`prefix:LocalName`）を実 IRI に展開する対応表。使うのは 
 | `LabelOverride`  | ラベルを直接上書き（ハード）                                     |
 | `ScoreReweight`  | スコアを重み付けで調整（ソフト、`params.weight`）                |
 | `ThresholdAdapt` | 判定閾値を適応（`params.threshold_delta` 等）                    |
-| `null`           | `judgment` が `KeepPrimary` / `Retire` / `ReviewRequired` のとき |
+| `null`           | `action` が `KeepPrimary` / `Retire` / `ReviewRequired` のとき |
 
-方向（`judgment`）× 方式（`method`）の 2 次元で表現し、`params` に方式ごとのパラメータを持たせる。
+方向（`action`）× 方式（`method`）の 2 次元で表現し、`params` に方式ごとのパラメータを持たせる。
 
 ### 6.3 レコードのフィールド
 
@@ -331,7 +331,7 @@ CURIE（`prefix:LocalName`）を実 IRI に展開する対応表。使うのは 
 - `revision`: ドメイン内追記ログの連番（＝バージョン軸）
 - `element_id`: 論理要素の安定 ID（編集は同一 ID で新 `revision`）。**全ドメインで一意**
   （全体1ファイルの `priority.json` §9.1 がこれをキーに順序付けるため）
-- `judgment` / `method` / `params`: 上記 2 軸
+- `action` / `method` / `params`: 上記 2 軸
 - `match`: 適用条件（`prototype_ids` / `similarity_threshold` / `scope`）
 - `valid_to`: 失効時刻（expiry。コンパクションで除外判定。§9 規則3）
 - `recorded_at`: トランザクション時刻（コミット時刻、UTC）。as-of 参照・順序補助
@@ -419,9 +419,9 @@ versions/
 `meta.json` が権威のため各行では持たない。整形は可読性のためで、実ファイルは各レコードを 1 行に格納する。
 
 ```json
-{"ontology_version":"1.2.0","revision":1001,"element_id":"e-8f3a1c","judgment":"OverrideNegative","method":"ScoreReweight","params":{"weight":0.3},"match":{"prototype_ids":["proto-1187","proto-1190"],"similarity_threshold":0.82,"scope":{"defect_class":"proj:PolymerResidue","measurement":"semicont:CriticalDimension"}},"valid_to":"2026-12-01T00:00:00Z","recorded_at":"2026-06-01T09:12:00Z","attributed_to":"op_tanaka","source_ref":"annotation:ann-5521"}
-{"ontology_version":"1.2.0","revision":1005,"element_id":"e-8f3a1c","judgment":"OverrideNegative","method":"ScoreReweight","params":{"weight":0.15},"match":{"prototype_ids":["proto-1187","proto-1190","proto-1203"],"similarity_threshold":0.85,"scope":{"defect_class":"proj:PolymerResidue","measurement":"semicont:CriticalDimension"}},"valid_to":"2026-12-01T00:00:00Z","recorded_at":"2026-06-15T14:03:00Z","attributed_to":"op_tanaka","source_ref":"annotation:ann-5602"}
-{"ontology_version":"1.2.0","revision":1020,"element_id":"e-8f3a1c","judgment":"Retire","method":null,"params":{},"match":null,"valid_to":null,"recorded_at":"2026-07-01T08:00:00Z","attributed_to":"op_tanaka","source_ref":"annotation:ann-5988"}
+{"ontology_version":"1.2.0","revision":1001,"element_id":"e-8f3a1c","action":"OverrideNegative","method":"ScoreReweight","params":{"weight":0.3},"match":{"prototype_ids":["proto-1187","proto-1190"],"similarity_threshold":0.82,"scope":{"defect_class":"proj:PolymerResidue","measurement":"semicont:CriticalDimension"}},"valid_to":"2026-12-01T00:00:00Z","recorded_at":"2026-06-01T09:12:00Z","attributed_to":"op_tanaka","source_ref":"annotation:ann-5521"}
+{"ontology_version":"1.2.0","revision":1005,"element_id":"e-8f3a1c","action":"OverrideNegative","method":"ScoreReweight","params":{"weight":0.15},"match":{"prototype_ids":["proto-1187","proto-1190","proto-1203"],"similarity_threshold":0.85,"scope":{"defect_class":"proj:PolymerResidue","measurement":"semicont:CriticalDimension"}},"valid_to":"2026-12-01T00:00:00Z","recorded_at":"2026-06-15T14:03:00Z","attributed_to":"op_tanaka","source_ref":"annotation:ann-5602"}
+{"ontology_version":"1.2.0","revision":1020,"element_id":"e-8f3a1c","action":"Retire","method":null,"params":{},"match":null,"valid_to":null,"recorded_at":"2026-07-01T08:00:00Z","attributed_to":"op_tanaka","source_ref":"annotation:ann-5988"}
 ```
 
 ### 8.3 稼働系がロードする有効スナップショット（`revision ≤ 1023` の解決結果）
@@ -438,7 +438,7 @@ versions/
     {
       "element_id": "e-2b90f4",
       "from_revision": 1012,
-      "judgment": "OverridePositive",
+      "action": "OverridePositive",
       "method": "LabelOverride",
       "params": {},
       "match": { "prototype_ids": ["proto-2041"], "similarity_threshold": 0.90, "scope": { "defect_class": "proj:MicroCrack" } },
@@ -487,7 +487,7 @@ versions/
      点をレビュー時に確認する。
 2. **safety rule**：同 specificity なら安全側を優先。順序は
    `OverridePositive`（見逃し救済）> `KeepPrimary`（一次判定を保つ）> `OverrideNegative`（過検出抑制）。
-   見逃しの方が高コストというポリシーを固定する（同スコープに相反 `judgment` が併存する矛盾入力時の決定用）。
+   見逃しの方が高コストというポリシーを固定する（同スコープに相反 `action` が併存する矛盾入力時の決定用）。
 3. **recency**：なお同点なら**新しい `recorded_at`（UTC・全ドメイン比較可）を優先**。`revision` は
    ドメインごとに独立採番のためクロスドメイン比較には使わない（同一ドメイン内の補助としてのみ有効）。
 4. **最終タイブレーク**：`element_id` の辞書順（総順序を保証し一意化）。
@@ -522,7 +522,7 @@ versions/
 
 ## 11. 検証（2 段構え）
 
-1. **構造検証**（`jsonschema`）：フィールド有無・型・enum（`judgment` / `method`）。
+1. **構造検証**（`jsonschema`）：フィールド有無・型・enum（`action` / `method`）。
 2. **統制語彙検証**：`domain.process` 等の CURIE が SemiKong オントロジーに実在するクラスかを照合
    （TTL をロードして IRI 集合で検証、または SHACL shapes を流用）。
    → 「オントロジーに無い工程名は登録できない」ガードとなり、`patch-feature-store` の
