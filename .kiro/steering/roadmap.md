@@ -61,7 +61,7 @@ FAISS ベースの特徴量ストア、HITL（ROI 注釈＋自然言語コメン
   - 検証済みプロトタイプ・正常特徴の登録トリガー（検証は llm-feedback-structuring、
     登録処理は patch-feature-store が所有。依存順序上は seam として扱い循環依存にしない）
     （llm-feedback-structuring ↔ patch-feature-store）
-  - 構造化 JSON の運用スキーマ（判定・適用範囲・優先度・有効期限）
+  - 構造化 JSON の運用スキーマ（判定・適用範囲・優先度）
     （llm-feedback-structuring ↔ promptable-correction-layer）
   - 異常スコアマップ・ROI 候補のインターフェース
     （primary-anomaly-detection ↔ promptable-correction-layer ↔ evaluation-framework）
