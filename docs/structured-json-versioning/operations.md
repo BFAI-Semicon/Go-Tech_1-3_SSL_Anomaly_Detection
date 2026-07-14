@@ -34,9 +34,7 @@
 
 ## 13. 未決事項
 
-- ドメイン識別子の主キー：人間可読スラッグ主体か、ハッシュ主体か（現状はスラッグ＝ラベル、
-  `domain_id`＝ハッシュの二本立てを推奨）。
-- `params` の持ち方（`weight` / `score_delta` / `threshold` 等）の確定。
+- `params` の持ち方（`method` 別のパラメータ。§6.2 の `weight` / `threshold_delta` 等）の確定。
 - 採用する SemiKong レイヤ／クラスの確定 IRI 取り込み、およびライセンス法務確認。
 - §9.1 の specificity 判定の厳密化（`match.scope` の部分一致・多軸指定時の具体度スコアの定義）。
 - §9.1 recency の厳密な全順序が必要なら、単一ライタが全ドメイン横断の global event id を採番する案
