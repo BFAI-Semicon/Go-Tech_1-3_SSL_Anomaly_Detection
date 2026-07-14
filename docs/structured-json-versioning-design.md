@@ -296,13 +296,13 @@ CURIE（`prefix:LocalName`）を実 IRI に展開する対応表。使うのは 
 
 ### 6.1 `action`（補正操作＝一次判定への効果・ライフサイクル）
 
-| 値                 | 一次 → 二次         | 意味                                                   | コンパクション | 広域ルールへの作用 |
-| ------------------ | ------------------- | ------------------------------------------------------ | -------------- | ------------------ |
-| `OverrideNegative` | Positive → Negative | 過検出抑制（既知の許容パターン）                       | 残す           | 具体なら勝つ       |
-| `OverridePositive` | Negative → Positive | 見逃し救済（エスカレーション）                         | 残す           | 具体なら勝つ       |
-| `KeepPrimary`      | 変更なし            | 補正せず一次判定を保つ**能動マスク**（広域補正を遮蔽） | 残す           | specificity で遮蔽 |
-| `ReviewRequired`   | 任意 → 保留         | 人間へエスカレーション                                 | 残す           | 具体なら勝つ       |
-| `Retire`           | —                   | この要素を**廃止**（削除表現。旧 `NoOverride`）        | **除外**       | フォールバック     |
+| 値                 | 一次 → 二次         | 意味                                                   | コンパクション | 広域ルールへの作用                                |
+| ------------------ | ------------------- | ------------------------------------------------------ | -------------- | ------------------------------------------------- |
+| `OverrideNegative` | Positive → Negative | 過検出抑制（既知の許容パターン）                       | 残す           | 具体なら勝つ                                      |
+| `OverridePositive` | Negative → Positive | 見逃し救済（エスカレーション）                         | 残す           | 具体なら勝つ                                      |
+| `KeepPrimary`      | 変更なし            | 補正せず一次判定を保つ**能動マスク**（広域補正を遮蔽） | 残す           | specificity で遮蔽                                |
+| `ReviewRequired`   | 任意 → 保留         | 人間へエスカレーション                                 | 残す           | 具体なら勝つ／同順位は保留優先（§9.1 rule2 短絡） |
+| `Retire`           | —                   | この要素を**廃止**（削除表現。旧 `NoOverride`）        | **除外**       | フォールバック                                    |
 
 - **`KeepPrimary` と `Retire` の違い**：どちらも局所的には一次判定が通るが、重なる広域ルールがある時に
   逆の挙動になる。`KeepPrimary` は残って広域を遮蔽（能動マスク）、`Retire` は消えて広域にフォールバック（削除）。
@@ -314,11 +314,11 @@ CURIE（`prefix:LocalName`）を実 IRI に展開する対応表。使うのは 
 
 `researches.md` §5 の 3 方式比較に対応。
 
-| 値               | 内容                                                             |
-| ---------------- | ---------------------------------------------------------------- |
-| `LabelOverride`  | ラベルを直接上書き（ハード）                                     |
-| `ScoreReweight`  | スコアを重み付けで調整（ソフト、`params.weight`）                |
-| `ThresholdAdapt` | 判定閾値を適応（`params.threshold_delta` 等）                    |
+| 値               | 内容                                                           |
+| ---------------- | -------------------------------------------------------------- |
+| `LabelOverride`  | ラベルを直接上書き（ハード）                                   |
+| `ScoreReweight`  | スコアを重み付けで調整（ソフト、`params.weight`）              |
+| `ThresholdAdapt` | 判定閾値を適応（`params.threshold_delta` 等）                  |
 | `null`           | `action` が `KeepPrimary` / `Retire` / `ReviewRequired` のとき |
 
 方向（`action`）× 方式（`method`）の 2 次元で表現し、`params` に方式ごとのパラメータを持たせる。
@@ -340,7 +340,8 @@ CURIE（`prefix:LocalName`）を実 IRI に展開する対応表。使うのは 
   検証結果など）は監査ログ側が保持する（`llm-feedback-structuring` の監査ログ独立モジュール）
 
 > **競合時の優先順位は per-record フィールドを持たない。** 別 `element_id` が同一入力にマッチした
-> 場合は §9 の決定的な優先順位チェーン（specificity → safety → recency → `element_id`）で解決し、
+> 場合は §9 の決定的な優先順位チェーン（specificity → `ReviewRequired` 保留短絡 → safety → recency →
+> `element_id`）で解決し、
 > 例外的に人手で順序を固定したいときのみ全体1ファイルの `priority.json`（§9.1）で上書きする。
 
 ## 7. ファイルレイアウトとマニフェスト
@@ -485,12 +486,22 @@ versions/
    - **安全上の注意**：`KeepPrimary` は specificity で勝つため、広域の `OverridePositive`（見逃し救済）も
      遮蔽しうる（＝見逃しを再び許容する方向）。運用者の明示意図として尊重するが、救済を消す設定になる
      点をレビュー時に確認する。
-2. **safety rule**：同 specificity なら安全側を優先。順序は
+2. **`ReviewRequired` 短絡（保留優先）**：specificity 同点の勝ち集合に `ReviewRequired` が 1 つでも
+   あれば、以降の safety 比較を打ち切って**保留（人間へエスカレーション）**にする。`ReviewRequired` は
+   分類（Positive/Negative）ではなく自動判定の一時停止であり、safety スカラ（見逃し⇄過検出の 1 軸）とは
+   別軸のため順序に混ぜず、最上位の短絡として扱う。これにより「人間が見るべき」という明示意図が
+   自動補正で握り潰されず、HITL への還流も保たれる。
+   - **specificity には従属する**：短絡は「同 specificity の勝ち集合内」でのみ効く。より具体的な
+     `OverrideNegative` 等があれば rule1 で先に決まり、広域の `ReviewRequired` は発火しない。
+   - **運用上の注意**：広域（工程ファミリ等）の `ReviewRequired` は人間キューを増やすため**抑制的に使う**
+     （ただし禁止はしない）。広域レビュー方針を張る場合はキューの SLA・滞留監視とセットで運用する。
+3. **safety rule**：`ReviewRequired` で決着しない同 specificity の競合は安全側を優先。順序は
    `OverridePositive`（見逃し救済）> `KeepPrimary`（一次判定を保つ）> `OverrideNegative`（過検出抑制）。
-   見逃しの方が高コストというポリシーを固定する（同スコープに相反 `action` が併存する矛盾入力時の決定用）。
-3. **recency**：なお同点なら**新しい `recorded_at`（UTC・全ドメイン比較可）を優先**。`revision` は
+   見逃しの方が高コストというポリシーを固定する（同スコープに相反 `action` が併存する矛盾入力時の決定用。
+   分類に効く 3 値のみを順序付け、`ReviewRequired` は rule2 の短絡で処理済み）。
+4. **recency**：なお同点なら**新しい `recorded_at`（UTC・全ドメイン比較可）を優先**。`revision` は
    ドメインごとに独立採番のためクロスドメイン比較には使わない（同一ドメイン内の補助としてのみ有効）。
-4. **最終タイブレーク**：`element_id` の辞書順（総順序を保証し一意化）。
+5. **最終タイブレーク**：`element_id` の辞書順（総順序を保証し一意化）。
 
 **任意の明示上書き（`priority.json`、全体1ファイル）**：自動ポリシーに逆らって特定要素を勝たせたい
 場合に、`element_id` を優先順に列挙した `priority.json` を **`versions/` 直下に 1 つだけ**置く。存在すれば
