@@ -78,9 +78,9 @@ versions/
 `meta.json` が権威のため各行では持たない。整形は可読性のためで、実ファイルは各レコードを 1 行に格納する。
 
 ```json
-{"ontology_version":"1.2.0","revision":1001,"element_id":"e-8f3a1c","action":"OverrideNegative","method":"ScoreReweight","params":{"weight":0.3},"match":{"prototype_ids":["proto-1187","proto-1190"],"similarity_threshold":0.82,"scope":{"defect_class":"proj:PolymerResidue","measurement":"semicont:CriticalDimension"}},"valid_to":"2026-12-01T00:00:00Z","recorded_at":"2026-06-01T09:12:00Z","attributed_to":"op_tanaka","source_ref":"annotation:ann-5521"}
-{"ontology_version":"1.2.0","revision":1005,"element_id":"e-8f3a1c","action":"OverrideNegative","method":"ScoreReweight","params":{"weight":0.15},"match":{"prototype_ids":["proto-1187","proto-1190","proto-1203"],"similarity_threshold":0.85,"scope":{"defect_class":"proj:PolymerResidue","measurement":"semicont:CriticalDimension"}},"valid_to":"2026-12-01T00:00:00Z","recorded_at":"2026-06-15T14:03:00Z","attributed_to":"op_tanaka","source_ref":"annotation:ann-5602"}
-{"ontology_version":"1.2.0","revision":1020,"element_id":"e-8f3a1c","action":"Retire","method":null,"params":{},"match":null,"valid_to":null,"recorded_at":"2026-07-01T08:00:00Z","attributed_to":"op_tanaka","source_ref":"annotation:ann-5988"}
+{"ontology_version":"1.2.0","revision":1001,"element_id":"e-8f3a1c","action":"OverrideNegative","method":"ScoreReweight","params":{"weight":0.3},"match":{"prototype_ids":["proto-1187","proto-1190"],"similarity_threshold":0.82,"scope":{"defect_class":"proj:PolymerResidue","measurement":"semicont:CriticalDimension"}},"recorded_at":"2026-06-01T09:12:00Z","attributed_to":"op_tanaka","source_ref":"annotation:ann-5521"}
+{"ontology_version":"1.2.0","revision":1005,"element_id":"e-8f3a1c","action":"OverrideNegative","method":"ScoreReweight","params":{"weight":0.15},"match":{"prototype_ids":["proto-1187","proto-1190","proto-1203"],"similarity_threshold":0.85,"scope":{"defect_class":"proj:PolymerResidue","measurement":"semicont:CriticalDimension"}},"recorded_at":"2026-06-15T14:03:00Z","attributed_to":"op_tanaka","source_ref":"annotation:ann-5602"}
+{"ontology_version":"1.2.0","revision":1020,"element_id":"e-8f3a1c","action":"Retire","method":null,"params":{},"match":null,"recorded_at":"2026-07-01T08:00:00Z","attributed_to":"op_tanaka","source_ref":"annotation:ann-5988"}
 ```
 
 ### 8.3 稼働系がロードする有効スナップショット（`revision ≤ 1023` の解決結果）
@@ -100,8 +100,7 @@ versions/
       "action": "OverridePositive",
       "method": "LabelOverride",
       "params": {},
-      "match": { "prototype_ids": ["proto-2041"], "similarity_threshold": 0.90, "scope": { "defect_class": "proj:MicroCrack" } },
-      "valid_to": null
+      "match": { "prototype_ids": ["proto-2041"], "similarity_threshold": 0.90, "scope": { "defect_class": "proj:MicroCrack" } }
     }
   ]
 }
