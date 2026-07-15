@@ -14,7 +14,7 @@ versions/
 │   └── mb-2026-07-01/                  # FAISS インデックス＋メタデータ層（snapshot_id で参照）
 └── domains/
     ├── drie__sin__plasmaetch__wafer/   # 完全指定ドメイン
-    │   ├── meta.json                   # 不変メタ（domain_id / domain のみ。ontology は持たない）
+    │   ├── meta.json                   # 不変メタ（domain_id / 作成時 ontology_version / domain）
     │   └── log.jsonl                   # 追記専用ログ（1 行 1 レコード）
     └── drie__any__any__wafer/          # DRIE 工程全体（材料・装置を問わない）
         ├── meta.json
@@ -28,10 +28,10 @@ versions/
 
 ### 7.1 マニフェスト例
 
-オントロジーは per-record の `ontology_version`（値の権威）＋ グローバル `ontology_registry.json`
-（定義＝prefixes / remap / components の権威。§5.2）で解決し、`meta.json` は domain identity
-（`domain_id` / `domain`）のみを持つ。したがってマニフェストも各ドメインの `meta.json` も
-`ontology` を持たない（per-domain のオントロジー権威は存在しない）。
+CURIE は、各 log 行の `ontology_version`、および `meta.json` の作成時 `ontology_version` とグローバルな
+`ontology_registry.json`（定義＝prefixes / remap / components の権威。§5.2）で解決する。`meta.json` の
+版は不変な `domain` タプルの解釈元を示すだけで、ドメインの active／候補オントロジー版ではない。
+マニフェストに per-domain のオントロジー版は持たせない。
 
 マニフェストは**稼働状態を構成するバージョンタプル全体**を束ねる：グローバルな `memory_bank`
 スナップショット（§2）、任意の優先順位明示上書き `priority`（§9.1）、各ドメインの `active_revision`
@@ -60,13 +60,15 @@ versions/
 
 ### 8.1 ドメインの不変メタ（`meta.json`）
 
-`domain_id` と `domain`（CURIE タプル）だけの純粋なドメイン識別。オントロジー情報は持たない
-（version は各 log 行の `ontology_version`、prefixes / remap はグローバルレジストリ §5.2 が権威）。
-これにより「meta の版は active か候補か」という同期問題がそもそも発生しない。
+`domain_id`、`domain`（CURIE タプル）、そのタプルを記述した作成時の `ontology_version` を持つ。
+この版は `domain` の解釈元として `meta.json` とともに凍結し、log に新しいオントロジー版の revision が
+追加されても更新しない。active／候補の状態ではないため同期問題は生じない。スナップショット生成時に
+この版から目標版へ remap し、`domain_id` は再計算しない（§5.1）。
 
 ```json
 {
   "domain_id": "sha256:3f9a…",
+  "ontology_version": "1.2.0",
   "domain": {
     "process": "semicont:DeepReactiveIonEtchProcess",
     "material": "semicont:SiliconNitride",
@@ -91,12 +93,29 @@ versions/
 ### 8.3 稼働系がロードする有効スナップショット（`revision ≤ 1023` の解決結果）
 
 スナップショットは派生物なので、**目標 `ontology_version` に正規化**して生成する
-（レジストリの remap を適用。生ログは混在版のまま保全）。
+（レジストリの remap を `meta.json` の `domain` と各 log 行の CURIE に適用。元データは書き換えない）。
+新旧表現を比較できるように、meta の作成時版、採用した各要素の元版、目標版における domain 表現を
+`domain_representations_by_ontology_version` へ版キーで格納する（版数に上限は設けない）。稼働系の判定には
+`domain_representations_by_ontology_version[target_ontology_version]`、すなわち目標版に対応する表現だけを使う。
 
 ```json
 {
-  "ontology_version": "1.2.0",
+  "target_ontology_version": "1.3.0",
   "domain_id": "sha256:3f9a…",
+  "domain_representations_by_ontology_version": {
+    "1.2.0": {
+      "process": "semicont:DeepReactiveIonEtchProcess",
+      "material": "semicont:SiliconNitride",
+      "equipment": "semicont:PlasmaEtchSystem",
+      "unit_of_work": "semicont:Wafer"
+    },
+    "1.3.0": {
+      "process": "semicont:DeepReactiveIonEtchProcess",
+      "material": "semicont:SiliconNitride",
+      "equipment": "semicont:PlasmaEtchTool",
+      "unit_of_work": "semicont:Wafer"
+    }
+  },
   "resolved_at_revision": 1023,
   "effective_elements": [
     {
@@ -113,3 +132,8 @@ versions/
 
 - `e-8f3a1c` は最新（`revision 1020`）が `Retire` のため有効集合から除外される（＝真の削除と同じ挙動）。
 - `resolved_at_revision` により、どのバージョンで解決したかを再現できる。
+- `domain_representations_by_ontology_version` は、`meta.json` の作成時表現から各版へ remap した
+  同一 domain の新旧表現。
+  3 版以上が混在する場合も同じマップへ版キーを追加する。
+- `target_ontology_version` は稼働系が使う domain 表現と、要素本体の CURIE の正規化先を示す。元の版は
+  `from_revision` で不変の `log.jsonl` を参照して確認し、元の `meta.json` と `domain_id` は変更しない。

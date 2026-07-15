@@ -19,38 +19,46 @@ Process / Materials / Equipment / Measurements / Units-of-work。
 - 値を自由文字列でなく CURIE 参照にすることで、統制語彙からの補完・表記ゆれ防止・機械検証が得られる。
 - レコードで使う語彙は **`semicont`（SemiKong・上流）と `proj`（自社拡張）の 2 つ**で、更新契機が独立する
   （SemiKong 採用替え／自社の欠陥語彙編集）。この 2 つを束ねた**自社の複合語彙バージョン**を
-  **レコード単位の `ontology_version`** に記録する（§6.3）。これが唯一の権威であり、`element_id` ごとに
-  異なる `ontology_version` が混在しうる。
+  各 log レコードの `ontology_version` に記録する（§6.3）。`element_id` ごとに異なる版が混在しうる。
+  `meta.json` にも、不変な domain CURIE タプルを解釈するための**作成時 `ontology_version`**を記録する。
 - **SemiKong は semver を持たない**（配布は日付タグ＝例 `260313-stable`／`stable` ブランチ）。よって
   `semicont` は**版番号ではなく git ref（タグ/コミット）でピン留め**し、版番号は自社側だけが採番する。
 - **オントロジーの定義（prefixes / remap 表 / 各コンポーネントの source・ref）は版をキーにした
-  「グローバルレジストリ」に一元管理する**（§5.2）。`meta.json` にはオントロジー情報を持たせない。
-- **なぜ `meta.json` に単一 `ontology` を置かないか**：レコードごとに `ontology_version` が自己記述されるため、
-  ドメイン単位の単一版は「1 ドメイン＝1 版」という誤った含意を生み、稼働／候補の同期も抱える冗長情報になる。
+  「グローバルレジストリ」に一元管理する**（§5.2）。`meta.json` は定義を複製せず版キーだけを持つ。
+- **`meta.json` の版の意味**：ドメインの active／候補オントロジー版ではなく、作成時の domain CURIE
+  タプルを解釈するための不変な版。log レコードの版とは独立しており、後から新しい版の revision が追加されても
+  更新しない。
 - 欠陥タイプ分類は SemiKong では手薄なため、自社名前空間 `proj:` で拡張する。
 - ライセンス/法務確認が必要（SemiKong はコードが MIT だが、オントロジー資産は上流ライセンス/条件を
   持ちうる）。正確な IRI は実際の `ontology.ttl` から取り込む。
 
 ### 5.1 オントロジーのバージョンアップ対応
 
-語彙が更新（SemiKong の採用替え、または自社 `proj` の編集）されても、**log.jsonl は不変**であり、
-各行の CURIE は「当時の `ontology_version`」に対して書かれている。`ontology_version` はレコード単位で
-自己記述されるので、版を「上げる」対象の単一フィールドは存在しない（版キーのレジストリに版を追加する）。
+語彙が更新（SemiKong の採用替え、または自社 `proj` の編集）されても、**log.jsonl と meta.json は不変**。
+各 log 行の CURIE は行自身の `ontology_version`、domain CURIE は `meta.json` の作成時
+`ontology_version` に対して書かれている。版を「上げる」対象の単一フィールドは存在せず、版キーの
+レジストリに版を追加する。
 複合語彙バージョンは **`semicont`（git ref）と `proj`（自社版）のどちらが変わっても上がる**。以下の方針で扱う。
 
 - **`ontology_version` はレコード単位で自己記述**（§6.3）。過去の判定再現には当時の語彙版が必要。
+- **`meta.json` の `ontology_version` は作成時の domain CURIE の解釈元として凍結**する。log に別版の
+  revision が追加されても更新しない。
 - **版の定義（prefixes / remap 表 / コンポーネント）はグローバルレジストリに版キーで追加する**（§5.2）。
   remap 表はドメインごとに散らばらず、`1.2.0 → 1.3.0` の 1 箇所で管理する（`semicont` 由来・`proj` 由来を同枠で）。
 - 必要なら影響ルールを新 CURIE で再表明（新 `revision`）し、新規レコードには新 `ontology_version` を刻む。
-- **`domain_id` は凍結**（§4.1）。CURIE 改名でドメイン同一性・ログ連続性を失わない。
-- **有効スナップショットは目標オントロジー版に正規化して再生成**（派生物なのでレジストリの remap を適用して
-  作り直してよい）。生ログは旧 CURIE のまま保全する。
+- **`domain_id` は凍結**（§4.1）。domain CURIE を remap しても再計算せず、ドメイン同一性・ログ連続性を保つ。
+- **有効スナップショットは目標オントロジー版に正規化して再生成**する。`meta.json` の domain CURIE は
+  meta の作成時版から、各 log 行の CURIE は行自身の版から、それぞれレジストリの remap を適用する。
+  スナップショットには、meta の作成時版、採用した要素の元版、目標版ごとの domain 表現を
+  `domain_representations_by_ontology_version` に格納し、正規化先を `target_ontology_version` で示す。
+  稼働系の判定には目標版に対応する domain と正規化済み要素だけを使い、要素の元版は `from_revision` で
+  生ログを参照して確認する。元の meta と生ログは書き換えない。
 - **昇格は評価ゲートを通す**。オントロジー変更の種類で判定への影響が異なるため、`evaluation-framework`
   で escape/overkill の回帰を確認してから promote する。ドメイン単位で段階的に上げてよい。
 
 オントロジー変更の種類と影響:
 
-| 変更種別                     | log.jsonl への影響               | 判定への影響                                 |
+| 変更種別                     | meta.json / log.jsonl への影響   | 判定への影響                                 |
 | ---------------------------- | -------------------------------- | -------------------------------------------- |
 | 追加のみ（新クラス）         | 既存 CURIE 有効、影響なし        | なし                                         |
 | 改名・移動（IRI 変更）       | 旧 CURIE が dangling、remap 必須 | remap 適用＋`domain_id` 凍結なら不変         |
@@ -61,15 +69,15 @@ Process / Materials / Equipment / Measurements / Units-of-work。
 `ontology_version` の差の現れ方は変更種別で異なる。**改名・移動**では CURIE 型フィールドの**値そのもの**
 が変わる（例 `semicont:PlasmaEtchSystem` → `semicont:PlasmaEtchTool`、remap で吸収）。一方**同一 IRI の
 意味変更・階層再編**では**値は同一のまま**で、差は `ontology_version` にしか現れない（値だけでは区別
-できないため per-record の `ontology_version` が要る）。いずれもフィールドの**キー・構造は不変**
-（構造の版は `schema_version` の管轄。§3）。
+できないため log 行と meta の各 CURIE に解釈元の `ontology_version` が要る）。いずれもフィールドの
+**キー・構造は不変**（構造の版は `schema_version` の管轄。§3）。
 
 ### 5.2 オントロジーレジストリ（グローバル・版キー）
 
 オントロジーの定義はドメインごとに持たず、プロジェクト共通の 1 ファイルに**版をキー**にして集約する。
 版キーは**自社の複合語彙バージョン**で、各エントリが `semicont`（SemiKong の git ref ピン）と `proj`
-（自社版）の 2 コンポーネントを持つ。各レコードの `ontology_version` がこのレジストリの該当版
-（`components` / `prefixes` / `remap_from`）を引く。
+（自社版）の 2 コンポーネントを持つ。各 log レコードと `meta.json` の `ontology_version` が
+このレジストリの該当版（`components` / `prefixes` / `remap_from`）を引く。
 
 ```json
 {
@@ -86,7 +94,7 @@ Process / Materials / Equipment / Measurements / Units-of-work。
     },
     "1.3.0": {
       "components": {
-        "semicont": { "source": "github.com/aitomatic/semikong", "ref": "260313-stable" },
+        "semicont": { "source": "github.com/aitomatic/semikong", "ref": "260701-stable" },
         "proj":     { "version": "2026-07-01", "source": "self@commit-abc123" }
       },
       "prefixes": {
@@ -94,7 +102,10 @@ Process / Materials / Equipment / Measurements / Units-of-work。
         "proj": "https://example.com/go-tech/defect#"
       },
       "remap_from": {
-        "1.2.0": { "proj:PolymerResidue": "proj:PolymerFilm" }
+        "1.2.0": {
+          "proj:PolymerResidue": "proj:PolymerFilm",
+          "semicont:PlasmaEtchSystem": "semicont:PlasmaEtchTool"
+        }
       }
     }
   }
@@ -103,16 +114,18 @@ Process / Materials / Equipment / Measurements / Units-of-work。
 
 - 版キー（`1.2.0` / `1.3.0`）は**自社が採番する複合語彙バージョン**。SemiKong のタグとは別物。
 - `components.semicont` は**版番号ではなく git ref（タグ/コミット）でピン**（SemiKong に semver が無いため）。
-  `components.proj` は自社の版・source。**`proj` だけ変えても複合版は上がる**（上の例は `semicont.ref`
-  据え置きで `proj` のみ更新）。source は名前空間ごとなので「上流 1 本」にならない。
+  `components.proj` は自社の版・source。どちらか一方だけ変えても複合版は上がる（上の例では両方を更新）。
+  source は名前空間ごとなので「上流 1 本」にならない。
 - 上流の著作来歴（派生元・公開者・原ライセンス）は**複製しない**（Aitomatic 管理。必要時は `ontology.ttl`
   を参照）。ここで持つのは「どの ref を採用したか」という**採用参照**のみ。
-- runtime（スナップショット生成・マッチング）は **per-record `ontology_version` ＋ レジストリ**だけで完結する。
-- `prefixes` は版で namespace が変わっても版キーで表現でき、remap 表を一元管理できる。`meta.json` は純粋な
-  ドメイン識別に保てる。
+- runtime（スナップショット生成・マッチング）は **log 行および meta の `ontology_version` ＋
+  レジストリ**で解釈元を確定する。稼働系のマッチングは目標版へ正規化済みのスナップショットを使用する。
+- `prefixes` は版で namespace が変わっても版キーで表現でき、remap 表を一元管理できる。`meta.json` は
+  domain CURIE の作成時版だけを持ち、定義自体は持たない。
 - **新規レコードに刻む `ontology_version` はビルドのパラメータで渡す**（例: 候補 Vn+1 ビルド時に
   `--ontology-version 1.3.0`）。ドメインに「現行版」を状態として持たせないことで、稼働／候補の
   同期問題を回避する。
+- **新規ドメイン作成時は同じビルドパラメータを `meta.json` に刻み、その後は更新しない**。
 
 ### 5.3 `prefixes` の各接頭辞
 
