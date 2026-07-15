@@ -69,8 +69,10 @@ echo $VIRTUAL_ENV   # .venv のパスが表示されれば有効
 
 ## 補足・注意
 
-- **anomalib は暫定で git ブランチを使用**しています（DINOv3 対応 PR。`pyproject.toml` の `[tool.uv.sources].anomalib` 参照）。
-  anomalib 2.6.0 が PyPI 公開されたら、`pyproject.toml` のコメントに従って PyPI 版へ切り替えてください。
+- **anomalib は暫定で本家の GitHub main ブランチを使用**しています（DINOv3 対応は本家
+  main に統合済みですが、対応するリリース版（2.6.0 想定）はまだ PyPI 未公開です。
+  `pyproject.toml` の `[tool.uv.sources].anomalib` 参照）。
+  リリース版が PyPI 公開されたら、`pyproject.toml` のコメントに従って PyPI 版へ切り替えてください。
 - **FAISS は `faiss-cpu`** を使用します（aarch64 では GPU 版 wheel が未提供のため）。
 - `.venv` はリポジトリに含めません。`mise run sync` でいつでも再構築できます。
 

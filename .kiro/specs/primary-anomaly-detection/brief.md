@@ -10,10 +10,10 @@
 
 - ソースコードは未実装。`scipy>=1.13`（Mahalanobis 距離用）、`scikit-learn>=1.4` が依存に
   定義済み（`pyproject.toml` 27-28行目）。
-- anomalib v2.5.0 の PatchCore は DINO 系バックボーンを正式サポートしていない
-  （既定は `wide_resnet50_2`）。DINOv2／DINOv3 の timm 経由 drop-in 対応は PR #3627 で
-  進行中のため、`feature/dinov3` ブランチを暫定使用（researches.md §10、
-  `pyproject.toml` 70-73行目）。
+- anomalib v2.5.0（PyPI 公開版）の PatchCore は DINO 系バックボーンを正式サポートしていない
+  （既定は `wide_resnet50_2`）。DINOv2／DINOv3 の timm 経由 drop-in 対応は本家 GitHub main
+  ブランチに統合済みのため、リリース版（2.6.0 想定）の PyPI 公開まで本家 main ブランチを
+  暫定使用（researches.md §10、`pyproject.toml` 70-75行目）。
 
 ## Desired Outcome
 

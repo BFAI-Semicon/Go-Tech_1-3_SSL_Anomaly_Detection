@@ -9,10 +9,10 @@
 ## Current State
 
 - ソースコードは未実装。依存関係のみ `pyproject.toml` に定義済み
-  （timm>=1.0.20: `vit_*_patch16_dinov3` 対応、anomalib は `feature/dinov3` ブランチ暫定）。
-- anomalib v2.5.0 の PatchCore は DINO 系バックボーンを正式サポートしておらず
-  （既定は CNN の `wide_resnet50_2`）、timm 経由 drop-in 対応は PR #3627 で進行中
-  （researches.md §10）。
+  （timm>=1.0.20: `vit_*_patch16_dinov3` 対応、anomalib は本家 main ブランチ暫定使用）。
+- anomalib v2.5.0（PyPI 公開版）の PatchCore は DINO 系バックボーンを正式サポートしておらず
+  （既定は CNN の `wide_resnet50_2`）、timm 経由 drop-in 対応は本家 GitHub main ブランチに
+  統合済み（researches.md §10）。
 - Meta 版 DINOv2 は抽出特徴へ layer norm を適用するか否かで精度が変わるため、
   比較実験では前処理条件を揃える必要がある（researches.md §10）。
 
@@ -72,5 +72,6 @@
 
 - 重み更新は行わない（researches.md §3.1）。
 - Python 3.12 固定・DGX Spark（aarch64／CUDA 13）対応（`pyproject.toml` 6-8行目）。
-- anomalib は 2.6.0 公開まで `feature/dinov3` ブランチを使用（`pyproject.toml` 70-73行目）。
+- anomalib はリリース版（2.6.0 想定）の公開まで本家 main ブランチを使用（DINOv3 対応は
+  main に統合済み。`pyproject.toml` 70-75行目）。
 - DINOv2 等のモデルライセンスは法務確認が必要（`docs/plan.md` リスクと対策）。

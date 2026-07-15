@@ -32,7 +32,9 @@ FAISS ベースの特徴量ストア、HITL（ROI 注釈＋自然言語コメン
   - PatchCore 蒸留・既存手法ベース整備（`docs/plan.md` 前半の別テーマ。researches.md には
     含まれないため本 roadmap の対象外）
   - ViT の重み更新・SSL 事前学習の実施（researches.md §3.1 で禁止）
-  - anomalib 本体の改修（DINOv3 対応は upstream の PR #3627 / `feature/dinov3` ブランチに依存）
+  - anomalib 本体の改修（DINOv3 対応は upstream の GitHub main ブランチに統合済み。
+    リリース版（2.6.0 想定）が PyPI 公開されるまでは `pyproject.toml` で本家 main
+    ブランチを暫定参照）
 
 ## Constraints
 
@@ -40,8 +42,8 @@ FAISS ベースの特徴量ストア、HITL（ROI 注釈＋自然言語コメン
   （`pyproject.toml` 6-8行目）。
 - 実行環境は NVIDIA DGX Spark（aarch64 / GB10 Grace Blackwell / CUDA 13）。torch は
   cu130 index から取得（`pyproject.toml` 59-69行目）。
-- anomalib は 2.6.0 の PyPI 公開まで `feature/dinov3` ブランチを暫定使用
-  （`pyproject.toml` 70-73行目）。
+- anomalib はリリース版（2.6.0 想定）の PyPI 公開まで本家（open-edge-platform/anomalib）の
+  GitHub main ブランチを暫定使用（DINOv3 対応は main に統合済み。`pyproject.toml` 70-75行目）。
 - FAISS は aarch64 のため CPU 版（`faiss-cpu`）を使用（`pyproject.toml` 22-25行目）。
 - DINOv2 等のモデルライセンスは早期に法務確認が必要（`docs/plan.md` リスクと対策）。
 
