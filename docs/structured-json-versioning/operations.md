@@ -36,6 +36,7 @@
 
 - `params` の持ち方（`method` 別のパラメータ。§6.2 の `weight` / `threshold_delta` 等）の確定。
 - `match.similarity_threshold` の距離尺度の確定：cosine 類似度か L2 距離か、値の大小方向（高いほど近い／低いほど近い）、および FAISS メトリック（`METRIC_INNER_PRODUCT` / `METRIC_L2` 等）・正規化有無との対応。§6.3 の適用条件と §2.1 の kNN が同一尺度であることを保証する。
+- ドメイン・スラッグの採番規則（§4.1）：CURIE（例: `DeepReactiveIonEtchProcess`）からの機械導出か人手命名か、衝突時・改名時のディレクトリ／manifest 追従。
 - 採用する SemiKong レイヤ／クラスの確定 IRI 取り込み、およびライセンス法務確認。
 - §9.1 の specificity 判定の厳密化（`match.scope` の部分一致・多軸指定時の具体度スコアの定義）。
 - §4.2／§9.1 の上位クラスマッチング方式：有効スナップショットの `ontology_version` に対応する
