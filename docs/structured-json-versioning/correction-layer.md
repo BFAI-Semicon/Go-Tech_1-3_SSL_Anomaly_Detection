@@ -46,7 +46,8 @@
 - `element_id`: 論理要素の安定 ID（編集は同一 ID で新 `revision`）。**全ドメインで一意**
   （稼働状態あたり全体1ファイルの `priority.json` §9.1 がこれをキーに順序付けるため）
 - `action` / `method` / `params`: 上記 2 軸
-- `match`: 適用条件（`prototype_ids` / `similarity_threshold` / `scope`）
+- `match`: 適用条件（`prototype_ids` / `similarity_threshold` / `scope`）。
+  `similarity_threshold` の距離尺度（cosine / L2 と FAISS メトリックの対応）は未決（§13）
 - `recorded_at`: トランザクション時刻（コミット時刻、UTC）。as-of 参照・順序補助
 - `attributed_to`: 実施者（HITL 担当者）。最小の来歴
 - `source_ref`: 独立**監査ログへの外部キー**（注釈アクティビティ ID）。詳細な来歴（出典・LLM モデル・
