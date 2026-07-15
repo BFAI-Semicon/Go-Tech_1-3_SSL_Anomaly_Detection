@@ -1,0 +1,33 @@
+# markdownlint-cli2 設定
+# ルール詳細: https://github.com/DavidAnson/markdownlint/blob/main/doc/Rules.md
+
+config:
+  # 日本語ドキュメントは行長を厳格にしない
+  MD013: false
+  # 複数のトップレベル見出しを許容（README / 仕様書など）
+  MD025: false
+  # フェンスコードブロックには言語を必須（.cursor/rules の MD040 方針）
+  MD040: true
+  # インライン HTML を許容（必要時）
+  MD033: false
+  # 見出しレベルの飛ばし・重複はノート系ドキュメントで頻出するため緩和
+  MD001: false
+  MD024: false
+  # 先頭が H1 でないメモ・抜粋を許容
+  MD041: false
+  # 強調を見出し代わりにする記法を許容（公式説明書の転記など）
+  MD036: false
+  # テーブルのパイプ整列スタイルは厳格にしない
+  MD060: false
+
+globs:
+  - "**/*.md"
+  - "**/*.mdc"
+
+ignores:
+  - ".venv/**"
+  - "node_modules/**"
+  - ".takt/**"
+  # 公式説明書の転記。体裁が markdownlint と合わないため対象外
+  - "docs/official.md"
+  - "docs/LeadersBoard/**"
