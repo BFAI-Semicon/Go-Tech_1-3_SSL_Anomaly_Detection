@@ -6,9 +6,10 @@
 
 ```text
 versions/
-├── manifest.json                       # バージョンタプルを束ねる（memory_bank + 各ドメイン revision。§7.1）
+├── manifest.json                       # バージョンタプルを束ねる（memory_bank + priority + 各ドメイン revision。§7.1）
 ├── ontology_registry.json              # オントロジー定義（版キー：components / prefixes / remap）共通（§5.2）
-├── priority.json                       # 任意：全体1ファイルの優先順位明示上書き（派生・再生成可能。§9.1）
+├── priorities/                         # 優先順位明示上書きの版付き不変アーティファクト（任意。§9.1）
+│   └── priority-2026-07-01.json
 ├── banks/                              # メモリバンク側の版付き不変アーティファクト（グローバル1軸。§2.1）
 │   └── mb-2026-07-01/                  # FAISS インデックス＋メタデータ層（snapshot_id で参照）
 └── domains/
@@ -32,14 +33,16 @@ versions/
 （`domain_id` / `domain`）のみを持つ。したがってマニフェストも各ドメインの `meta.json` も
 `ontology` を持たない（per-domain のオントロジー権威は存在しない）。
 
-マニフェストは**バージョンタプルの両側**を束ねる：グローバルな `memory_bank` スナップショット（§2）と、
-各ドメインの `active_revision`（§4）。`memory_bank` はメモリバンク側（タプルの片側）の権威で、全ドメインが
-共有する単一プールなので 1 つだけ持つ。
+マニフェストは**稼働状態を構成するバージョンタプル全体**を束ねる：グローバルな `memory_bank`
+スナップショット（§2）、任意の優先順位明示上書き `priority`（§9.1）、各ドメインの `active_revision`
+（§4）。`memory_bank` はメモリバンク側の権威で、全ドメインが共有する単一プールなので 1 つだけ持つ。
+`priority` は版付き不変アーティファクトを最大 1 つ参照し、フィールドが無い場合は明示上書きなしとする。
 
 ```json
 {
   "manifest_version": 42,
   "memory_bank": { "snapshot_id": "mb-2026-07-01", "prototype_count": 1284000, "artifact": "banks/mb-2026-07-01/" },
+  "priority": { "artifact": "priorities/priority-2026-07-01.json" },
   "domains": [
     { "domain_id": "sha256:3f9a…", "slug": "drie__sin__plasmaetch__wafer", "active_revision": 1023, "log": "domains/drie__sin__plasmaetch__wafer/log.jsonl" },
     { "domain_id": "sha256:7c1e…", "slug": "drie__any__any__wafer",        "active_revision": 1,    "log": "domains/drie__any__any__wafer/log.jsonl" }
@@ -48,7 +51,9 @@ versions/
 ```
 
 - `memory_bank.snapshot_id` を差し替えるとメモリバンク側が原子的に切替わる（全ドメインに波及。§4）。
-- 過去状態の完全再現は `(memory_bank.snapshot_id, 各ドメインの active_revision)` のタプル全体で決まる。
+- `priority.artifact` はマニフェストと同時に切り替わる。参照先は公開後に書き換えない（§9.1）。
+- 過去状態の完全再現は `(memory_bank.snapshot_id, priority.artifact または未指定, 各ドメインの
+  active_revision)` のタプル全体で決まる。
 - `banks/<snapshot_id>/` はディスク上の版付き不変アーティファクト（FAISS インデックス＋メタデータ層。§2.1）。
 
 ## 8. JSON サンプル
