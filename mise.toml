@@ -4,6 +4,8 @@
 [tools]
 python = "3.12"   # torch cu130 の aarch64 wheel (cp312) が提供されており DGX Spark に最適
 uv = "latest"     # 依存解決・venv 管理
+node = "lts"      # markdownlint-cli2 (npm) の実行に必要
+"npm:markdownlint-cli2" = "0.22.0"
 
 [env]
 # リポジトリ直下に .venv を自動生成・有効化する（uv sync もこの .venv を使う）
@@ -20,3 +22,11 @@ run = "uv sync --extra llm --extra dev"
 [tasks.gpu-check]
 description = "PyTorch から CUDA(Blackwell) が見えるか確認"
 run = "python -c \"import torch; print('torch', torch.__version__); print('cuda', torch.cuda.is_available(), torch.cuda.get_device_name(0) if torch.cuda.is_available() else '-')\""
+
+[tasks.lint-md]
+description = "Markdown を markdownlint-cli2 で検査"
+run = "markdownlint-cli2"
+
+[tasks.lint-md-fix]
+description = "Markdown の自動修正可能な指摘を修正"
+run = "markdownlint-cli2 --fix"

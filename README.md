@@ -60,12 +60,14 @@ echo $VIRTUAL_ENV   # .venv のパスが表示されれば有効
 
 ## よく使うコマンド
 
-| コマンド             | 内容                                |
-| -------------------- | ----------------------------------- |
-| `mise install`       | Python / uv を導入し `.venv` を用意 |
-| `mise run sync`      | 依存を同期（`uv sync --extra llm`） |
-| `mise run sync-dev`  | 開発用依存も含めて同期              |
-| `mise run gpu-check` | PyTorch から CUDA が見えるか確認    |
+| コマンド               | 内容                                |
+| ---------------------- | ----------------------------------- |
+| `mise install`         | Python / uv / markdownlint 等を導入 |
+| `mise run sync`        | 依存を同期（`uv sync --extra llm`） |
+| `mise run sync-dev`    | 開発用依存も含めて同期              |
+| `mise run gpu-check`   | PyTorch から CUDA が見えるか確認    |
+| `mise run lint-md`     | Markdown を markdownlint で検査     |
+| `mise run lint-md-fix` | Markdown の自動修正可能な指摘を修正 |
 
 ## 補足・注意
 

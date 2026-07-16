@@ -1,0 +1,17 @@
+# markdownlint-cli2 設定
+# ルール詳細: https://github.com/DavidAnson/markdownlint/blob/main/doc/Rules.md
+
+config:
+  # 日本語ドキュメントは行長を厳格にしない
+  MD013: false
+
+globs:
+  - "**/*.md"
+  - "**/*.mdc"
+
+ignores:
+  - ".takt/**"
+  - ".venv/**"
+  - "docs/LeadersBoard/**"
+  - "docs/official.md"
+  - "node_modules/**"
