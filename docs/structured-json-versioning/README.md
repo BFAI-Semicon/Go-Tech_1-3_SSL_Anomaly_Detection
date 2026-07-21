@@ -13,7 +13,7 @@ Promptable Patch Retrieval パイプラインにおける、HITL 由来の運用
 | セクション            | 話題                                                                   | ファイル                                                   |
 | --------------------- | ---------------------------------------------------------------------- | ---------------------------------------------------------- |
 | §1                    | 全体アーキテクチャ（コンテナ構成）                                     | このファイル（下記）                                       |
-| §2 / §3 / §4          | バージョン昇格モデル・イベントソーシング・ドメイン単位管理             | [versioning-model.md](./versioning-model.md)               |
+| §2 / §3 / §4          | バージョン昇格モデル・スナップショット版管理・ドメイン単位管理         | [versioning-model.md](./versioning-model.md)               |
 | §5                    | SemiKong オントロジー整合・レジストリ・prefixes                        | [ontology.md](./ontology.md)                               |
 | §6 / §9               | 補正レイヤ判定スキーマ・有効スナップショット解決規則・優先順位チェーン | [correction-layer.md](./correction-layer.md)               |
 | §7 / §8               | ファイルレイアウト・マニフェスト・JSON サンプル                        | [file-layout-and-samples.md](./file-layout-and-samples.md) |
