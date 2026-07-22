@@ -24,8 +24,10 @@
 - 検証は**publish 前（ビルド時）**に実施し、**合格したドメイン版だけをアーティファクトとして publish** する
   （検証済みは構造上の不変条件になるため、per-record の `schema_validated` フラグは持たない）。あわせて次を
   publish 前に assert する:
-  - **identity フィールド（`domain_id` / `domain` タプル / `domain_source_ontology_version`）が前版と不変**
-    （統合により可変ファイルに同居するため構造的ガードが無い。§7）。
+  - **identity（`domain_id` / `domain_source_ontology_version` / 作成時版の domain 表現
+    `domain_representations_by_ontology_version[domain_source_ontology_version]`）が前版と不変**
+    （統合により可変ファイルに同居するため構造的ガードが無い。§7）。`domain_representations_by_ontology_version`
+    は新しいオントロジー版の表現を追記できるためマップ全体は不変にできず、不変対象は作成時版に対応する表現に限る。
   - **bank 互換の祖先判定**：active な bank から全ドメイン版の `built_against_bank_snapshot_id` に到達可能（§4・§7.1）。
 - **検証失敗は独立監査ログに記録**する（`llm-feedback-structuring` の監査ログ責務）。レコード本体には
   来歴詳細を持たず、`source_ref` で監査ログを辿る。
