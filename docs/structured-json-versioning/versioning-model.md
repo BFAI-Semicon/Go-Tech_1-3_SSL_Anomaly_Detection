@@ -44,7 +44,8 @@ Blue-Green 型のアーティファクト昇格モデルを採用する。
 
 - **2 層構成**：特徴ベクトルと `prototype_id` は FAISS（`faiss-cpu`）が保持し kNN を担う。ドメインタグ等の
   メタデータは FAISS 外の**メタデータ層**が `prototype_id` をキーに保持する（`patch-feature-store` の
-  索引層／メタデータ層分離）。`prototype_id` は FAISS の int64 ID に対応づける。
+  索引層／メタデータ層分離）。`prototype_id` は FAISS の int64 ID そのものであり、補正レコードの
+  `match.prototype_ids` でも JSON 整数（int64）として持つ（文字列化しない。§8.1）。
   - 間引きから保護したいプロトタイプは、**メタデータ層の `pinned` フラグ**で表現する（補正レコードに依存
     させない）。coreset は自レイヤ（`pinned` 等）のみを見て自己完結し、依存は「補正→メモリバンク」の
     一方向を保つ。
