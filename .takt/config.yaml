@@ -1,0 +1,5 @@
+runtime:
+  prepare:
+    - scripts/prepare-python.sh
+workflow_runtime_prepare:
+  custom_scripts: true
