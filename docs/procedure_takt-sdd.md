@@ -33,9 +33,13 @@ takt-sdd kiro-spec-quick "docs/researches.md に基づき、DINOv3を特徴抽�
 ### フェーズごとに人間が確認しながら進める場合（推奨）
 
 ```bash
+# 0. spec の初期化（spec.json と draft requirements.md が作られる）
+#    kiro-discovery 済みで .kiro/specs/{feature}/brief.md がある場合も必須。
+#    brief.md のみのディレクトリは再利用される。
+takt-sdd kiro-spec-init -- "feature={feature}"
+
 # 1. 要件定義（EARS形式のrequirements.mdが生成される）
-takt-sdd kiro-spec-requirements -- "実装したい機能の説明..."
-#    → .kiro/specs/{feature}/ が作られるのでfeature名を確認し、内容をレビュー
+takt-sdd kiro-spec-requirements -- "feature={feature}。実装したい機能の説明..."
 
 # 2. ギャップ分析（既存コードがある場合のみ。今回は新規なのでスキップ可）
 takt-sdd kiro-validate-gap -- "feature={feature}"
