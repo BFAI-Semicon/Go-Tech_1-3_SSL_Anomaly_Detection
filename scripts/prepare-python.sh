@@ -42,5 +42,9 @@ mise env --shell bash | sed 's/^export //'
 echo "UV_CACHE_DIR=$UV_CACHE_DIR"
 echo "HF_HOME=$HF_HOME"
 echo "TORCH_HOME=$TORCH_HOME"
+# takt の runtime 分離は XDG_CONFIG_HOME を .takt/.runtime/config に向けるが、
+# cursor-agent は認証トークンを $XDG_CONFIG_HOME/cursor から読むため、
+# そのままだと "Cursor authentication failed" になる。既定の場所へ戻す。
+echo "XDG_CONFIG_HOME=$HOME/.config"
 
 log "done."
