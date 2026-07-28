@@ -32,6 +32,11 @@
   （判定・適用範囲・優先度）を評価する。
 - 補正方式（再重み付け／閾値適応／ラベル上書き）と条件ソース（ROI のみ／言語のみ／併用）を
   設定で切り替え可能にし、評価実験の比較軸に対応する（researches.md §5）。
+- 判定スキーマ（補正レコードの action／method／match）・優先順位チェーン・バージョン管理の
+  詳細設計は `docs/structured-json-versioning/README.md`（設計メモ）に従う。実装は
+  `docs/incremental-development-plan.md` の Phase 0–7（判定ロジック→バージョン管理→
+  オントロジーの順に直交導入）で段階化し、採用ライブラリは
+  `docs/library-adoption-proposal.md` の提案に従う。
 
 ## Scope
 

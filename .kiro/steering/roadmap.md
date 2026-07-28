@@ -46,6 +46,11 @@ FAISS ベースの特徴量ストア、HITL（ROI 注釈＋自然言語コメン
   GitHub main ブランチを暫定使用（DINOv3 対応は main に統合済み。`pyproject.toml` 70-75行目）。
 - FAISS は aarch64 のため CPU 版（`faiss-cpu`）を使用（`pyproject.toml` 22-25行目）。
 - DINOv2 等のモデルライセンスは早期に法務確認が必要（`docs/plan.md` リスクと対策）。
+- 各 spec で使うライブラリは `docs/library-adoption-proposal.md` の採用提案に従う。
+- メモリバンクの版管理は、bank 版管理の着手前（`docs/incremental-development-plan.md`
+  Phase 5）に Lance / LanceDB のスパイクを実施し、FAISS＋自作メタデータ層から
+  置き換えるかを判断する（`docs/library-adoption-proposal.md` §3）。判断までは
+  FAISS 前提の記述を維持する。
 
 ## Boundary Strategy
 
