@@ -15,3 +15,7 @@ ignores:
   - "docs/LeadersBoard/**"
   - "docs/official.md"
   - "node_modules/**"
+  # cc-sdd インストーラの生成物（再インストールで上書きされるため手直ししない）
+  - ".cursor/skills/**"
+  - ".kiro/settings/templates/**"
+  - "AGENTS.md"
