@@ -1,3 +1,4 @@
+language: ja
 runtime:
   prepare:
     - scripts/prepare-python.sh
