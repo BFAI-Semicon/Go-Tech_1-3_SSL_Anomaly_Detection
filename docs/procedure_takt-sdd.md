@@ -17,6 +17,17 @@ model: sonnet
 language: ja
 ```
 
+## 前提：cc-sdd テンプレートの導入（導入済み）
+
+`kiro-spec-init` 等のワークフローは `.kiro/settings/templates/` のテンプレートと
+`.cursor/skills/kiro-*` のスキルを参照する。これらは takt-sdd には同梱されず、
+cc-sdd のインストーラで配置する（未配置だと template missing で BLOCKED になる）。
+
+```bash
+npx cc-sdd@latest --agent cursor-skills --lang ja --yes
+# → .kiro/settings/templates/、.cursor/skills/、AGENTS.md が作られる
+```
+
 ## 基本の開発フロー
 
 takt-sddは「**仕様（spec）を先に固め、人間が各フェーズ間で承認しながら進む**」流れです。成果物はすべて `.kiro/specs/{feature}/` に出力されます。
