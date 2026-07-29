@@ -30,7 +30,7 @@
 
 **Objective:** 開発者として、補正レイヤの一連の判定処理を合成データだけで動かして検証したい。それにより、上流コンポーネント（特徴抽出・特徴量ストア・一次検出・構造化）の完成を待たずに判定ロジックを固められる。
 
-#### Acceptance Criteria
+#### Acceptance Criteria (Requirement 1)
 
 1. When 合成プロトタイプ集合とドメイン別補正定義のフィクスチャが読み込まれた, the 補正レイヤ shall 近傍検索と補正判定を実行可能な状態を構築する。
 2. When ROI 埋め込みに対する近傍検索が要求された, the 補正レイヤ shall 最近傍プロトタイプの識別子と類似度を返す。
@@ -41,7 +41,7 @@
 
 **Objective:** 品質管理者として、既知の許容パターンに近い過検出が適用条件に基づいて自動補正されることを望む。それにより、False Positive の確認負荷を削減できる。
 
-#### Acceptance Criteria
+#### Acceptance Criteria (Requirement 2)
 
 1. When 一次判定を伴うパッチが入力された, the 補正レイヤ shall 当該パッチの ROI 埋め込みと登録済みプロトタイプとの類似度照合を実行する。
 2. When match の prototype_ids に含まれるプロトタイプとの類似度が similarity_threshold の条件を満たした, the 補正レイヤ shall 当該補正レコードを適用対象と判定する。
@@ -53,7 +53,7 @@
 
 **Objective:** 運用担当者として、HITL 由来の補正指示の 4 種類の操作（過検出抑制・見逃し救済・現状維持・人間確認）が意図どおり一次判定へ作用することを望む。それにより、現場の判断を判定へ正確に反映できる。
 
-#### Acceptance Criteria
+#### Acceptance Criteria (Requirement 3)
 
 1. When 一次判定 Positive の入力に OverrideNegative レコードが適用された, the 補正レイヤ shall 二次判定を Negative（許容）にする。
 2. When 一次判定 Negative の入力に OverridePositive レコードが適用された, the 補正レイヤ shall 二次判定を Positive（NG）にする。
@@ -64,7 +64,7 @@
 
 **Objective:** 研究開発者として、3 つの補正方式（ラベル上書き・スコア再重み付け・閾値適応）それぞれの効果を検証できることを望む。それにより、補正方式間の比較検証（researches.md §5）の基盤が得られる。
 
-#### Acceptance Criteria
+#### Acceptance Criteria (Requirement 4)
 
 1. When LabelOverride 方式のレコードが適用された, the 補正レイヤ shall スコアと閾値を再計算せずに判定ラベルを action の方向へ直接上書きする。
 2. When ScoreReweight 方式のレコードが適用された, the 補正レイヤ shall params の重み付けパラメータで異常スコアを再構成し、再構成後のスコアと閾値の比較で二次判定を導出する。
@@ -75,7 +75,7 @@
 
 **Objective:** 運用担当者として、不正な補正定義が判定に使われる前に拒否されることを望む。それにより、誤った補正の混入を防げる。
 
-#### Acceptance Criteria
+#### Acceptance Criteria (Requirement 5)
 
 1. When ドメイン別補正定義が読み込まれた, the 補正レイヤ shall 各レコードの element_id・action・method・params・match・recorded_at・attributed_to・source_ref の全フィールドを解釈する。
 2. If 補正定義に必須フィールドの欠落・型不一致・定義外の action もしくは method の値が含まれる, then the 補正レイヤ shall 当該定義を拒否し、拒否理由を報告する。
@@ -87,7 +87,7 @@
 
 **Objective:** 運用担当者として、複数ドメイン（工程・材料・装置・作業単位）の補正定義を同時に有効化し、具体ドメインと広域ドメインのルールを併用したい。それにより、個別条件と工程全体の運用ルールを両立できる。
 
-#### Acceptance Criteria
+#### Acceptance Criteria (Requirement 6)
 
 1. When 複数ドメインの補正定義が読み込まれた, the 補正レイヤ shall 全ドメインの有効レコードを合成して照合対象にする。
 2. Where ドメイン軸の指定に `any` が含まれる, the 補正レイヤ shall 当該レコードを当該軸の任意の値を持つ入力へ適用可能な広域ルールとして解釈する。
@@ -98,7 +98,7 @@
 
 **Objective:** 運用担当者として、複数の補正指示が同一入力に競合しても結果が一意に決まることを望む。それにより、判定の再現性と説明可能性を保てる。
 
-#### Acceptance Criteria
+#### Acceptance Criteria (Requirement 7)
 
 1. When 異なる element_id の複数レコードが同一入力にマッチした, the 補正レイヤ shall specificity、ReviewRequired 短絡、safety、recency、element_id の順で構成される総順序により勝者を一意に決定する。
 2. If specificity 同点の勝ち集合に ReviewRequired のレコードが含まれる, then the 補正レイヤ shall 以降の比較を打ち切り、最終判定を保留（要確認）にする。
@@ -112,7 +112,7 @@
 
 **Objective:** 品質管理者として、パッチごとに NG／許容／要確認のいずれかの最終判定を受け取りたい。それにより、過検出の抑制と人間確認の振り分けを運用に組み込める。
 
-#### Acceptance Criteria
+#### Acceptance Criteria (Requirement 8)
 
 1. When 補正判定が実行された, the 補正レイヤ shall 最終判定として NG、許容、要確認のいずれかを返す。
 2. The 補正レイヤ shall モデル重みの更新を伴わない推論時の条件適用としてのみ補正を実行する。
