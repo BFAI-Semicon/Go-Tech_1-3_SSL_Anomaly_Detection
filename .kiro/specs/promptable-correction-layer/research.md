@@ -258,17 +258,28 @@
 - **Trade-offs**: model 層が numpy 型（`ndarray`）に依存するが、`PatchInput.roi_embedding` が既に保持しており新規の依存ではない。
 - **Follow-up**: Phase 8 で patch-feature-store のアダプタが同 Protocol を満たすことを統合テストで確認する。公開 API の縮小は Phase 8 の seam 確定時に再検討する（いまはしない）。
 
-### Decision: ドメイン軸の絞り込みは軸パターン索引（入力側キーではなくレコード側パターンをキーにする）
+### Decision: ドメイン軸照合は `AxisMatcher` port、索引データは `DomainSet`（model）
 
-- **Context**: 設計検証（2026-07-30、DESIGN-ARCH-004）で、`DomainSet` がフラットなレコード列で `applicable_records` が全走査になっており、段階計画 Phase 3 の「合成インメモリ索引」および設計メモ §10 の「線形スキャン禁止」を満たさないと指摘された。
+- **Context**: 設計検証 DESIGN-ARCH-004 で全走査が指摘され軸パターン索引を導入したあと、DESIGN-ARCH-008／009 で (a) 照合が boundary に固定され `package-dependency-direction.md` の decision 側 `AxisMatcher` と矛盾する、(b) `DomainSet` 集約が boundary にあり Engine→Loader 図と注入契約が不一致、と指摘された。
 - **Alternatives Considered**:
-  1. 全走査のまま（合成データ数百件なら性能問題は起きない）— 段階計画の Phase 3 完了条件を満たさず、Phase 4 以降で全ドメインをロードする際に作り直しになる。
-  2. **入力ドメインキー**（具体 4 軸）を索引キーにし、各レコードを自身がカバーする全キーへ登録 — ドメイン定義に現れない**未知ドメインの入力で広域（`any`）レコードを取りこぼす**。一次判定がドメイン非依存で未知ドメインにも判定を出す設計（設計メモ §3）と矛盾する。
-  3. **レコード側の軸パターン**（各軸が具体値または `any`）を索引キーにし、判定時に入力の具体 4 軸から各軸を `any` に落とした 2^4 = 16 パターンを生成して引く — 参照は有効レコード総数によらず定数回。未知ドメインでも `("any","any","any","any")` 等が正しく引ける。
-- **Selected Approach**: 3 を採用。`DomainSet` は `records`（全体ビュー）と `index`（パターン → レコード列）を持ち、`candidates(domain)` が specificity 降順で候補を返す。`matching` はドメイン軸照合を持たず（索引の不変条件として前提）、類似度条件のみを評価する。
-- **Rationale**: Phase 0–3 のドメイン軸は不透明文字列の完全一致のみなので、パターン生成は 16 通りの列挙で閉じる。責務も自然に分かれる（ドメイン軸＝ロード時に決まる静的構造→境界層、類似度＝入力ごとに変わる動的条件→判定層）。
-- **Trade-offs**: ドメイン軸照合の正しさが索引実装に集約されるため、索引と素朴な全走査の等価性を hypothesis で検証する必要がある（テスト戦略に追加済み）。
-- **Follow-up**: Phase 7 で上位クラス階層マッチを導入する際、パターン生成規則を上位クラス集合へ拡張する（design.md の Revalidation Trigger）。
+  1. 索引＋照合を boundary `DomainSet.candidates` に一体化 — Phase 7 で ontology が boundary に逆流しうる。
+  2. 照合も索引も decision に置く — ロード時索引構築（静的）と判定時照合（差し替え可能）が混ざる。
+  3. **分離**: `AxisMatcher` Protocol（`model/ports.py`）が照合意味論、`DomainSet`（`model/domain_set.py`）が索引データ、`domain_loader` は構築のみ、Phase 0–3 実装は `decision/axis_matching.py` の ExactAny。
+- **Selected Approach**: 3 を採用。`DomainSet.candidates(domain, matcher)` は matcher が返すパターンで索引を引くだけ。engine は `SimilaritySource`・`AxisMatcher`・`DomainSet` を注入され、Loader には依存しない。mermaid もこれに合わせる。
+- **Rationale**: `docs/package-dependency-direction.md` の依存性逆転点 1（decision ← ontology）を型レベルで実現する。Phase 7 は注入差し替えのみ。
+- **Trade-offs**: 組み立て側が matcher と DomainSet の両方を渡す必要がある（composition root／conftest の責務）。
+- **Follow-up**: Phase 7 で階層 `AxisMatcher` を ontology パッケージが提供することを Revalidation Trigger に記載済み。
+
+### Decision: 定義側 `DomainAxes` と入力側 `ConcreteDomainAxes` を型分離する
+
+- **Context**: 設計検証（2026-07-30、DESIGN-ARCH-010）。同一型に「定義では any 可／入力では any 不可」が同居し、検証所有者と拒否テストが未定義だった。
+- **Alternatives Considered**:
+  1. 同一型＋`PatchInput` 構築時バリデータ — 動くが、型名だけでは契約が読めない。
+  2. 型分離 — `DomainAxes`（定義・EffectiveRecord）と `ConcreteDomainAxes`（PatchInput。any で ValidationError）。
+- **Selected Approach**: 2 を採用。拒否テストを `test_types.py` に置く。
+- **Rationale**: フィールド設計原則（1 型 1 意味）と整合し、AxisMatcher の入力型も `ConcreteDomainAxes` で固定できる。
+- **Trade-offs**: 定義→入力の変換は不要（別用途）。テスト用に両方を手で書く必要がある。
+- **Follow-up**: なし。
 
 ### Decision: resolution が保証するのは「解決結果の一意性」であり総順序ではない
 
@@ -292,7 +303,7 @@
 ## Risks & Mitigations
 
 - specificity の暫定定義が Phase 7（上位クラス階層）で変わる — 定義を `decision/resolution.py` の単一関数に局所化し、hypothesis の決定性性質テストを差し替え時の回帰ゲートにする。
-- ドメイン軸照合が索引実装（`boundary/domain_loader.py`）に集約されたことで、索引のバグがそのまま誤適用になる — 索引と素朴な全走査の等価性を hypothesis の性質テストで固定し、未知ドメイン入力に対する `any` レコードの引き当ても明示的に検証する。
+- `AxisMatcher` と索引データの不整合（matcher が返すパターンと `DomainSet` のキー規約が食い違う）で誤適用になる — `ExactAnyAxisMatcher`＋索引の等価性を hypothesis で固定し、未知ドメイン入力に対する `any` レコードの引き当ても明示的に検証する。Phase 7 差し替え時は新 matcher に対して同じ等価性テストを再実行する。
 - 浮動小数点比較の境界（`anomaly_score > threshold`・`similarity >= similarity_threshold`）の不一致 — 比較の向き・等号の有無をデータモデル定義に明文化し、境界値テストを必須にする。
 - cosine 入力の不正（NaN／ゼロノルム等）が静かに壊れた判定を生む — `PrototypeStore` の Preconditions と拒否テストで境界に閉じる（DESIGN-ARCH-007）。
 - 検証経路ごとの例外分散で拒否理由の報告が漏れる — `DomainViolation` への集約と `load_domain_set` 経由の 3 経路テストで防ぐ（DESIGN-ARCH-006）。

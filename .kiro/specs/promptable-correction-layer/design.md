@@ -51,6 +51,7 @@
 - 類似度尺度（cosine／L2 正規化／閾値の大小方向）の変更（patch-feature-store の実メトリックとの突合。Phase 8）
 - プロトタイプ種別 `kind` の導入（設計メモ §2.1）により、実運用では一次判定（正常集合＝`normal`／`acceptable`）と補正照合（全種別）で参照集合が異なる。本スコープの合成 `PrototypeStore` は単一集合のため、Phase 8 統合時に参照集合の分離と突合する
 - specificity 定義の変更（Phase 7 の上位クラス階層導入時）
+- `AxisMatcher` 実装の差し替え（Phase 7: ExactAny → 階層マッチ。engine への注入差し替えのみで decision／boundary は不変であること）
 - 最終判定ラベル集合（NG／許容／要確認）の変更（evaluation-framework・運用への波及）
 - ドメイン軸（process／material／equipment／unit_of_work の 4 軸）の変更
 
@@ -74,6 +75,7 @@ graph TB
         Matching[matching]
         Resolution[resolution]
         Correction[correction]
+        AxisExact[axis_matching ExactAny]
     end
     subgraph boundary[入力境界層（boundary/）]
         Loader[domain_loader]
@@ -84,15 +86,17 @@ graph TB
         Records[records]
         Types[types]
         Ports[ports]
+        DomainSetNode[domain_set]
     end
     Engine --> Primary
     Engine --> Matching
     Engine --> Resolution
     Engine --> Correction
     Engine --> Ports
-    Engine --> Loader
+    Engine --> DomainSetNode
     Loader --> Schema
     Loader --> Records
+    Loader --> DomainSetNode
     Schema --> Records
     Primary --> Types
     Matching --> Records
@@ -100,18 +104,26 @@ graph TB
     Resolution --> Records
     Correction --> Records
     Correction --> Types
+    AxisExact --> Ports
+    AxisExact --> Types
     Records --> Types
+    DomainSetNode --> Records
+    DomainSetNode --> Ports
+    DomainSetNode --> Types
     Store --> Ports
 ```
 
-**依存方向（import-linter の契約で機械検査。違反は CI エラー）**: `model`（`types`／`ports` → `records`）→ `boundary`（`schema`／`prototype_store` → `domain_loader`）／`decision`（`primary`／`matching`／`correction`／`resolution`）→ `engine`。逆方向 import と循環は禁止。`boundary` と `decision` は互いに import しない。`decision` 内の各モジュールも互いに import しない（`engine` が合成する）。`engine` は boundary の具体ストア型に依存せず、`model/ports.py` の `SimilaritySource` Protocol に依存する（実体は構築時に注入）。契約の定義は Modified Files の `[tool.importlinter]` を参照。
+**依存方向（import-linter の契約で機械検査。違反は CI エラー）**: `model`（`types`／`ports` → `records`／`domain_set`）→ `boundary`（`schema`／`prototype_store` → `domain_loader`）／`decision`（`primary`／`matching`／`correction`／`resolution`／`axis_matching`）→ `engine`。逆方向 import と循環は禁止。`boundary` と `decision` は互いに import しない。`decision` 内の各モジュールも互いに import しない（`engine` が合成する）。`engine` は boundary の具体型に依存せず、`model/ports.py` の `SimilaritySource`／`AxisMatcher` と `model/domain_set.py` の `DomainSet` に依存する（実体は構築時に注入。`load_domain_set` は engine 外の組み立てで呼ぶ）。契約の定義は Modified Files の `[tool.importlinter]` を参照。
 
 **Key Decisions**:
 
 - 一次判定（`primary`）と合成プロトタイプストア（`prototype_store`）は Phase 8 で実物（primary-anomaly-detection／patch-feature-store）に差し替える seam として独立モジュールに隔離する。
 - `engine` は具体ストア型ではなく `model/ports.py` の `SimilaritySource` Protocol に依存する（設計検証 DESIGN-ARCH-002 対応）。Phase 8 の差し替えは port を満たす実装の注入だけで済み、`engine` と公開 API は変わらない。
+- ドメイン軸照合は `model/ports.py` の `AxisMatcher` Protocol に切り出す（設計検証 DESIGN-ARCH-008、`docs/package-dependency-direction.md` の依存性逆転点）。Phase 0–3 は `decision/axis_matching.py` の完全一致＋`any` 実装を注入し、Phase 7 は ontology パッケージの階層実装に差し替える（decision／boundary は `rdflib` を import しない）。索引データ（パターン→レコード）は `DomainSet` が持ち、照合意味論は `AxisMatcher` だけが持つ。
+- `DomainSet` は集約として `model/domain_set.py` に置く（設計検証 DESIGN-ARCH-009）。`domain_loader` は構築して返すだけで、engine は `DomainSet` を注入される（Loader へは依存しない）。
+- 定義側ドメイン軸（`DomainAxes`、`any` 可）と入力側（`ConcreteDomainAxes`、`any` 不可）を型分離する（設計検証 DESIGN-ARCH-010）。
 - 類似度計算（照会埋め込みの L2 正規化を含む）は `prototype_store` に一元化し、一次判定と `similarity_threshold` 充足判定が常に同一尺度になることを構造で保証する（要件 2.5）。
-- 設定値（一次判定の固定閾値・ドメイン定義パス）は境界（engine 構築時）で解決し、内部は解決済みの値のみを扱う。類似度も engine がストアで解決し、`primary`／`matching` は解決済みの値を引数で受け取る（ストアへ直接依存しない）。
+- 設定値（一次判定の固定閾値・ドメイン定義パス）は境界（組み立て時）で解決し、内部は解決済みの値のみを扱う。類似度も engine がストアで解決し、`primary`／`matching` は解決済みの値を引数で受け取る（ストアへ直接依存しない）。
 
 ### 技術スタック
 
@@ -142,23 +154,27 @@ src/
     │                            #   合成データで自己完結する意図的な選択。根拠は research.md）
     ├── model/                   # モデル層（最内側。パッケージ内の誰にも依存しない）
     │   ├── __init__.py
-    │   ├── types.py             # コア型: ラベル enum・DomainAxes・PatchInput・PrimaryJudgment・FinalJudgment
-    │   ├── ports.py             # engine が依存する類似度取得 port: SimilaritySource Protocol・NeighborHit
+    │   ├── types.py             # コア型: ラベル enum・DomainAxes（定義・any 可）・
+    │   │                        #   ConcreteDomainAxes（入力・any 不可）・PatchInput・
+    │   │                        #   PrimaryJudgment・FinalJudgment
+    │   ├── ports.py             # SimilaritySource・AxisMatcher Protocol・NeighborHit・DomainPattern
+    │   ├── domain_set.py        # DomainSet 集約（レコード＋軸パターン索引・candidates）
     │   └── records.py           # pydantic モデル: CorrectionRecord・MatchCriteria・Action/Method enum・
     │                            #   method 別 params モデル・action×method 制約バリデータ・
-    │                            #   EffectiveRecord（レコード＋由来ドメイン軸）
+    │                            #   EffectiveRecord（レコード＋由来 DomainAxes）
     ├── boundary/                # 入力境界層（model のみに依存。decision に触れない）
     │   ├── __init__.py
     │   ├── schema.py            # pydantic モデルからの JSON Schema 生成、jsonschema／pydantic 違反の
     │   │                        #   DomainViolation（structural／semantic）への変換
     │   ├── prototype_store.py   # 合成プロトタイプ集合＋FAISS IndexFlatIP: kNN 検索と指定 id 群への類似度計算
-    │   └── domain_loader.py     # ドメイン定義 JSON のロード・検証委譲・複数ドメイン合成（DomainSet）・
-    │                            #   軸パターン索引の構築と candidates 引き当て・
+    │   └── domain_loader.py     # ドメイン定義 JSON のロード・検証委譲・DomainSet の構築
+    │                            #   （索引データの登録のみ。照合意味論は持たない）・
     │                            #   element_id 全体一意性の検証・DomainValidationError
     ├── decision/                # 判定ロジック層（model のみに依存。モジュール間は互いに import しない）
     │   ├── __init__.py
     │   ├── primary.py           # 合成一次判定: 異常スコア（1 − 最大類似度）と固定閾値の比較
     │   ├── matching.py          # 適用可否評価: 索引候補に対する prototype_ids 類似度条件
+    │   ├── axis_matching.py     # Phase 0–3 の AxisMatcher 実装（完全一致＋ any）
     │   ├── correction.py        # action×method の解釈: 二次判定（ラベル上書き・スコア再重み付け・閾値適応）
     │   └── resolution.py        # 優先順位チェーン: specificity → ReviewRequired 短絡 → safety → recency → element_id
     └── engine.py                # composition root（CorrectionEngine）: 一次判定 → 選別 → 競合解決 → 補正 → 最終判定の合成
@@ -172,8 +188,9 @@ tests/
 ├── test_records.py                 # 全フィールド解釈・action×method 制約・params 形（Phase 2）
 ├── test_schema_validation.py       # 不正 JSON の拒否と違反理由の報告（Phase 2）
 ├── test_domain_loader.py           # ロード・複数ドメイン合成・element_id 重複拒否（Phase 1→3）
-├── test_domain_index.py            # 索引の候補抽出: any 軸・未知ドメイン・specificity 降順、
-│                                   #   hypothesis による全走査との等価性（Phase 3）
+├── test_axis_matching.py           # ExactAnyAxisMatcher: any・未知ドメイン・specificity 降順（Phase 3）
+├── test_domain_index.py            # DomainSet.candidates＋AxisMatcher: 全走査との等価性（Phase 3）
+├── test_types.py                   # ConcreteDomainAxes の any 拒否・DomainAxes の any 許容（Phase 1）
 ├── test_matching.py                # 類似度閾値・複数条件 AND・類似度条件なし（Phase 1→3）
 ├── test_correction.py              # 4 action × 3 method の一次→二次変換（Phase 1→2）
 ├── test_resolution.py              # チェーン各段のテーブル駆動テスト・KeepPrimary 遮蔽 vs 削除フォールバック（Phase 3）
@@ -207,15 +224,16 @@ type = "independence"
 modules = [
     "correction_layer.decision.primary",
     "correction_layer.decision.matching",
+    "correction_layer.decision.axis_matching",
     "correction_layer.decision.resolution",
     "correction_layer.decision.correction",
 ]
 
 [[tool.importlinter.contracts]]
-name = "model 内は records → types／ports の一方向"
+name = "model 内は records／domain_set → types／ports の一方向"
 type = "layers"
 layers = [
-    "correction_layer.model.records",
+    "correction_layer.model.records : correction_layer.model.domain_set",
     "correction_layer.model.types : correction_layer.model.ports",
 ]
 
@@ -233,34 +251,39 @@ layers = [
 ### 段階計画との対応
 
 - **Phase 0**
-  - 新規・拡張対象: `model/ports.py`（`NeighborHit`・`SimilaritySource`）、`boundary/prototype_store.py`、
-    `tests/conftest.py`、`fixtures/domains/`、`pyproject.toml`（pytest 設定・import-linter 契約）、
+  - 新規・拡張対象: `model/ports.py`（`NeighborHit`・`SimilaritySource`・`AxisMatcher`・`DomainPattern`）、
+    `boundary/prototype_store.py`、`tests/conftest.py`、`fixtures/domains/`、
+    `pyproject.toml`（pytest 設定・import-linter 契約）、
     `.github/workflows/python-ci.yml`（ruff・`lint-imports`・pytest の CI 配線）
   - 完了確認: fixture のロードと kNN 検索が通り、CI で lint・依存方向検査・テストが実行される
 - **Phase 1**
-  - 新規・拡張対象: `model/types.py`、`decision/primary.py`、`decision/matching.py`（最小）、
+  - 新規・拡張対象: `model/types.py`（`DomainAxes`／`ConcreteDomainAxes`）、`model/domain_set.py`、
+    `decision/primary.py`、`decision/matching.py`（最小）、`decision/axis_matching.py`（ExactAny）、
     `decision/correction.py`（`OverrideNegative`×`LabelOverride`）、
     `boundary/domain_loader.py`（単一ファイル）、`engine.py`
-  - 完了確認: 一次 Positive のパッチがプロトタイプ近傍で許容に反転する E2E
+  - 完了確認: 一次 Positive のパッチがプロトタイプ近傍で許容に反転する E2E、
+    `ConcreteDomainAxes` の `any` 拒否
 - **Phase 2**
   - 新規・拡張対象: `model/records.py`（全フィールド・全 enum）、`boundary/schema.py`、
     `decision/correction.py`（全 action×method）
   - 完了確認: 4 action の一次→二次変換、不正 JSON の reject
 - **Phase 3**
-  - 新規・拡張対象: `boundary/domain_loader.py`（複数ドメイン合成・軸パターン索引の構築と
-    `candidates` 引き当て）、`decision/matching.py`（索引候補の受領）、`decision/resolution.py`
+  - 新規・拡張対象: `boundary/domain_loader.py`（複数ドメイン合成・索引データ構築）、
+    `decision/axis_matching.py`（複数パターン）、`decision/matching.py`（索引候補の受領）、
+    `decision/resolution.py`
   - 完了確認: チェーン全段のテーブル駆動テスト＋hypothesis の決定性性質、
-    索引の候補抽出が全走査と同一集合を返すこと
+    `AxisMatcher`＋索引の候補抽出が全走査と同一集合を返すこと
 
 ## システムフロー
 
 ```mermaid
 flowchart TD
     P[PatchInput 受領] --> PJ[primary が異常スコアと固定閾値で一次判定]
-    P --> IX[DomainSet.candidates がドメイン索引で候補を絞り込み]
-    DS[DomainSet 軸パターン索引] --> IX
+    P --> IX[DomainSet.candidates が AxisMatcher と索引で候補を絞り込み]
+    AM[AxisMatcher] --> IX
+    DS[DomainSet 索引] --> IX
     IX --> M[matching が候補から類似度条件で適用対象を選別]
-    ST[PrototypeStore 類似度] --> PJ
+    ST[SimilaritySource] --> PJ
     ST --> M
     M -->|適用対象なし| F0[一次判定をそのまま最終判定へ写像]
     M -->|適用対象あり| R[resolution が優先順位チェーンで解決]
@@ -270,15 +293,15 @@ flowchart TD
 ```
 
 - 適用候補の選別条件は一次判定の結果に依存しない（類似度・ドメイン軸のみ）。一次判定と選別は独立に計算し、engine が合成する。
-- ドメイン軸の絞り込みは `DomainSet` の索引が担い（`candidates`）、`matching` は索引が返した候補に対して類似度条件のみを評価する。有効レコード全件の走査は行わない（設計メモ §10）。
+- ドメイン軸の絞り込みは `DomainSet.candidates(domain, matcher)` が担う。照合意味論は注入された `AxisMatcher`、索引データは `DomainSet`。`matching` は返された候補に対して類似度条件のみを評価する。有効レコード全件の走査は行わない（設計メモ §10）。
 - 類似度は engine が注入された `SimilaritySource`（Phase 0–3 の実体は `PrototypeStore`）の `nearest`（一次判定用の最大類似度）と `similarities`（選別用の `match.prototype_ids` 類似度。候補のうち類似度条件を持つレコードの分のみ）で解決し、解決済みの値を一次判定と選別へ渡す（境界での解決）。
 - 優先順位チェーンの詳細はコンポーネント `resolution` を参照。
 
 ## 要件トレーサビリティ
 
 - **1.1** フィクスチャから実行可能状態を構築
-  - コンポーネント: domain_loader, prototype_store, engine
-  - インターフェース／フロー: `load_domain_set`, `PrototypeStore.build`, `CorrectionEngine.__init__`
+  - コンポーネント: domain_loader, prototype_store, axis_matching, engine
+  - インターフェース／フロー: `load_domain_set` → `DomainSet`、`PrototypeStore.build`、`ExactAnyAxisMatcher`、`CorrectionEngine.__init__`
 - **1.2** 最近傍プロトタイプの id と類似度を返す
   - コンポーネント: prototype_store
   - インターフェース／フロー: `PrototypeStore.nearest`
@@ -340,8 +363,8 @@ flowchart TD
   - コンポーネント: records
   - インターフェース／フロー: `CorrectionRecord` の model バリデータ
 - **5.4** 複数の適用条件はすべて充足（AND）
-  - コンポーネント: domain_loader, matching
-  - インターフェース／フロー: `DomainSet.candidates`（ドメイン軸）＋ `applicable_records`（指定時の類似度条件）
+  - コンポーネント: domain_set, axis_matching, matching
+  - インターフェース／フロー: `DomainSet.candidates`＋`AxisMatcher`（ドメイン軸）＋ `applicable_records`（指定時の類似度条件）
 - **5.5** 類似度条件の対の片方だけの指定を拒否
   - コンポーネント: records
   - インターフェース／フロー: `MatchCriteria` の model バリデータ
@@ -349,11 +372,11 @@ flowchart TD
   - コンポーネント: records
   - インターフェース／フロー: `CorrectionRecord` の model バリデータ
 - **6.1** 複数ドメインの有効レコードを合成
-  - コンポーネント: domain_loader
-  - インターフェース／フロー: `load_domain_set` → `DomainSet`（軸パターン索引を同時構築）
+  - コンポーネント: domain_loader, domain_set
+  - インターフェース／フロー: `load_domain_set` → `DomainSet`（索引データを同時構築）
 - **6.2** `any` を広域ルールとして解釈
-  - コンポーネント: domain_loader
-  - インターフェース／フロー: `DomainSet.candidates`（入力軸から 16 パターンキーを生成して引き当て）
+  - コンポーネント: axis_matching, domain_set
+  - インターフェース／フロー: `AxisMatcher.matching_patterns` → `DomainSet.candidates`（Phase 0–3 は ExactAny）
 - **6.3** 具体ドメインを広域より優先
   - コンポーネント: resolution
   - インターフェース／フロー: specificity（辞書式: 非 `any` 軸数 → 類似度条件の有無）
@@ -390,14 +413,18 @@ flowchart TD
 
 ## コンポーネントとインターフェース
 
-- **types**（モデル（model/））: ラベル・入出力の共有型
+- **types**（モデル（model/））: ラベル・入出力の共有型（`DomainAxes`／`ConcreteDomainAxes`）
   - Req Coverage: 8.1
   - Key Dependencies: pydantic (P0)
   - Contracts: State
-- **ports**（モデル（model/））: engine が依存する類似度取得 port（`SimilaritySource`／`NeighborHit`）
-  - Req Coverage: 1.2, 2.5
+- **ports**（モデル（model/））: `SimilaritySource`／`AxisMatcher`／`NeighborHit`／`DomainPattern`
+  - Req Coverage: 1.2, 2.5, 6.2
   - Key Dependencies: numpy (P0)
   - Contracts: Service
+- **domain_set**（モデル（model/））: 有効レコード集合と軸パターン索引の集約
+  - Req Coverage: 6.1, 6.2
+  - Key Dependencies: records (P0), ports (P0), types (P0)
+  - Contracts: State
 - **records**（モデル（model/））: 補正レコードの型付きモデルと組合せ制約
   - Req Coverage: 4.4, 5.1, 5.3, 5.5, 5.6
   - Key Dependencies: types (P0)
@@ -410,13 +437,17 @@ flowchart TD
   - Req Coverage: 1.1, 1.2, 2.5
   - Key Dependencies: faiss (P0), numpy (P0)
   - Contracts: Service
-- **domain_loader**（入力境界（boundary/））: ドメイン定義のロード・合成・違反集約・軸パターン索引
-  - Req Coverage: 1.1, 5.2, 5.3, 5.5, 5.6, 6.1, 6.2, 6.4
-  - Key Dependencies: schema (P0), records (P0)
+- **domain_loader**（入力境界（boundary/））: ドメイン定義のロード・違反集約・DomainSet 構築
+  - Req Coverage: 1.1, 5.2, 5.3, 5.5, 5.6, 6.1, 6.4
+  - Key Dependencies: schema (P0), records (P0), domain_set (P0)
   - Contracts: Service
 - **primary**（判定ロジック（decision/））: 合成一次判定（解決済み類似度を受領）
   - Req Coverage: 1.3
   - Key Dependencies: types (P0)
+  - Contracts: Service
+- **axis_matching**（判定ロジック（decision/））: Phase 0–3 の `AxisMatcher`（完全一致＋`any`）
+  - Req Coverage: 6.2
+  - Key Dependencies: ports (P0), types (P0)
   - Contracts: Service
 - **matching**（判定ロジック（decision/））: 索引候補からの適用対象選別（解決済み類似度を受領）
   - Req Coverage: 2.1–2.3, 2.6, 5.4
@@ -432,26 +463,29 @@ flowchart TD
   - Contracts: Service
 - **engine**（オーケストレーション）: パイプライン合成と最終判定写像
   - Req Coverage: 1.1, 1.4, 2.4, 8.1, 8.2
-  - Key Dependencies: 上記すべて (P0)
+  - Key Dependencies: ports, domain_set, decision/* (P0)
   - Contracts: Service
 
 ### モデル層（model/）
 
 #### ports
 
-| Field        | Detail                                            |
-| ------------ | ------------------------------------------------- |
-| Intent       | engine が依存する類似度取得インターフェースの定義 |
-| Requirements | 1.2, 2.5                                          |
+| Field        | Detail                                                        |
+| ------------ | ------------------------------------------------------------- |
+| Intent       | engine が依存する類似度取得・ドメイン軸照合のインターフェース |
+| Requirements | 1.2, 2.5, 6.2                                                 |
 
 ##### Responsibilities & Constraints (ports)
 
-- engine が必要とするストア操作（kNN 検索・指定 id 群への類似度計算）を `SimilaritySource` Protocol として定義する。engine は具体ストア型に依存せず、この port にのみ依存する（設計検証 DESIGN-ARCH-002 対応）。
-- 実装（Phase 0–3 は `boundary/prototype_store.py`、Phase 8 は patch-feature-store のアダプタ）は Protocol を構造的に満たせばよく、明示継承しない。差し替えで engine・公開 API は変わらない。
+- engine が必要とするストア操作（kNN 検索・指定 id 群への類似度計算）を `SimilaritySource` Protocol として定義する（設計検証 DESIGN-ARCH-002 対応）。
+- ドメイン軸照合を `AxisMatcher` Protocol として定義する（設計検証 DESIGN-ARCH-008、`docs/package-dependency-direction.md`）。照合意味論（完全一致＋`any`／上位クラス階層）はこの port の実装が持ち、索引データ構造は持たない。
+- 実装は Protocol を構造的に満たせばよく、明示継承しない。差し替えで engine・公開 API は変わらない。
 
 ##### Service Interface (ports)
 
 ```python
+DomainPattern = tuple[str, str, str, str]   # 軸パターン（各要素は具体値または "any"）
+
 @dataclass(frozen=True)
 class NeighborHit:
     prototype_id: int
@@ -460,7 +494,42 @@ class NeighborHit:
 class SimilaritySource(Protocol):
     def nearest(self, embedding: np.ndarray, k: int = 1) -> list[NeighborHit]: ...
     def similarities(self, embedding: np.ndarray, prototype_ids: Sequence[int]) -> dict[int, float]: ...
+
+class AxisMatcher(Protocol):
+    def matching_patterns(self, domain: ConcreteDomainAxes) -> Sequence[DomainPattern]:
+        """入力の具体 4 軸に適合する軸パターンを specificity 降順（非 any 軸数の多い順）で返す。"""
 ```
+
+#### domain_set
+
+| Field        | Detail                                         |
+| ------------ | ---------------------------------------------- |
+| Intent       | 有効レコード集合と軸パターン索引を持つ不変集約 |
+| Requirements | 6.1, 6.2                                       |
+
+##### Responsibilities & Constraints (domain_set)
+
+- ロード済みの全有効レコードと、由来ドメインの軸パターンをキーとする索引を保持する（設計検証 DESIGN-ARCH-009。model 層の集約）。
+- `candidates` は注入された `AxisMatcher` が返すパターン列で索引を引き、適合レコードを返す。照合意味論は持たない（二重実装しない）。
+- 構築後は不変。構築は `domain_loader` が行う。
+
+##### Service Interface (domain_set)
+
+```python
+@dataclass(frozen=True)
+class DomainSet:
+    records: tuple[EffectiveRecord, ...]                        # 全有効レコード（監査・テスト用）
+    index: Mapping[DomainPattern, tuple[EffectiveRecord, ...]]  # 軸パターン → 当該パターンのレコード
+
+    def candidates(
+        self, domain: ConcreteDomainAxes, matcher: AxisMatcher
+    ) -> tuple[EffectiveRecord, ...]:
+        """matcher.matching_patterns(domain) で得たキーで索引を引き、
+        specificity 降順の候補を返す（線形走査しない）。"""
+```
+
+- Invariants: `index` の全エントリの和は `records` に一致する（各レコードはちょうど 1 つのパターンキーに属する）。
+- Postconditions: 同一の `DomainSet`・入力軸・`AxisMatcher` に対して戻り値の並びは常に同一。
 
 #### records
 
@@ -598,10 +667,10 @@ class PrototypeStore:  # model/ports.py の SimilaritySource を構造的に充�
 
 #### domain_loader
 
-| Field        | Detail                                                           |
-| ------------ | ---------------------------------------------------------------- |
-| Intent       | ドメイン定義 JSON のロード・違反集約・複数ドメイン合成・索引構築 |
-| Requirements | 1.1, 5.2, 5.3, 5.5, 5.6, 6.1, 6.2, 6.4                           |
+| Field        | Detail                                                     |
+| ------------ | ---------------------------------------------------------- |
+| Intent       | ドメイン定義 JSON のロード・違反集約・DomainSet の構築     |
+| Requirements | 1.1, 5.2, 5.3, 5.5, 5.6, 6.1, 6.4                          |
 
 ##### Responsibilities & Constraints (domain_loader)
 
@@ -609,34 +678,19 @@ class PrototypeStore:  # model/ports.py の SimilaritySource を構造的に充�
   1. `schema.validate_domain_document` → `kind=structural` の違反を収集
   2. `DomainDefinition` パース → pydantic 失敗時は `semantic_violations_from_validation_error` で `kind=semantic` に変換して収集（要件 5.3／5.5／5.6）
   3. 全ファイルのパース成功後、`element_id` の**全ドメイン横断の一意性**を検証し、重複は `kind=cross_file` の `DomainViolation` として**重複に関与する全ファイル**の一覧へ載せる（`json_path` は当該ファイル内の要素パス、`related_paths` は他ファイルの対応パス。設計メモ §6.3）
-- 全ドメインの要素を「レコード＋由来ドメイン軸」（`records.EffectiveRecord`）に展開して `DomainSet` へ合成する（要件 6.1）。ファイルに存在しない要素は有効集合に含まれない（削除＝不在。要件 6.4）。
-- **ロード時に不変のドメイン索引を構築する**（段階計画 Phase 3 の「合成インメモリ索引」、設計メモ §10 の線形スキャン禁止）。索引のキーは**由来ドメイン定義の軸パターンそのもの**（各軸が具体値または `any`）で、値は当該パターンのレコード列。判定時は入力パッチの具体 4 軸から、各軸を `any` に落とした組合せ 2^4 = 16 個のキーを生成して引き当て、候補だけを `matching` へ渡す。有効レコード総数によらず参照は定数回で、全レコード走査は行わない。
-  - パターン側をキーにすることで、**ドメイン定義に現れない未知ドメインの入力でも広域（`any`）レコードが正しく引ける**（入力側キーを索引化すると未知ドメインで広域ルールを取りこぼす）。
-  - 引き当ては specificity 降順（非 `any` 軸数の多いキーから）で行い、`resolution` へ渡す候補列の順序を入力ファイルの並びに依存させない。
-  - Phase 0–3 のドメイン軸は不透明文字列の完全一致のみ（上位クラス階層は Phase 7）なので、キー生成は 16 通りの列挙で閉じる。Phase 7 で階層マッチを入れる際は、この生成規則を上位クラス集合へ拡張する（Revalidation Trigger）。
+- 全ドメインの要素を「レコード＋由来ドメイン軸」（`records.EffectiveRecord`）に展開し、`model/domain_set.py` の `DomainSet` を構築して返す（要件 6.1）。ファイルに存在しない要素は有効集合に含まれない（削除＝不在。要件 6.4）。
+- **索引データの登録のみ**を行う（段階計画 Phase 3 の合成インメモリ索引、設計メモ §10）。キーは由来ドメイン定義の `DomainAxes` を `DomainPattern` に写したもの。**照合意味論（`any` 展開・階層マッチ）は持たない**（それは `AxisMatcher` の責務。設計検証 DESIGN-ARCH-008）。
+- engine からは呼ばれない。組み立て側（テスト・フィクスチャ・将来の app 層）が `load_domain_set` の戻り値を engine に注入する（設計検証 DESIGN-ARCH-009）。
 
 ##### Service Interface (domain_loader)
 
 ```python
-DomainPattern = tuple[str, str, str, str]   # 由来ドメインの軸パターン（各要素は具体値または "any"）
-
-@dataclass(frozen=True)
-class DomainSet:
-    records: tuple[EffectiveRecord, ...]                        # 全有効レコード（監査・テスト用の全体ビュー）
-    index: Mapping[DomainPattern, tuple[EffectiveRecord, ...]]  # 軸パターン → 当該パターンのレコード
-
-    def candidates(self, domain: DomainAxes) -> tuple[EffectiveRecord, ...]:
-        """入力の具体 4 軸から 16 個のパターンキーを生成して索引を引き、
-        ドメイン軸に適合する候補のみを specificity 降順で返す（線形走査しない）。"""
-
 class DomainValidationError(Exception):
     violations: Mapping[str, list[DomainViolation]]   # ファイルパス → 違反一覧（structural/semantic/cross_file）
 
 def load_domain_set(paths: Sequence[Path]) -> DomainSet: ...
 ```
 
-- Invariants: `index` の全エントリの和は `records` に一致する（各レコードはちょうど 1 つのパターンキーに属する）。構築後は不変。
-- Postconditions: `candidates` の戻り値は、同じ `DomainSet` と同じ入力軸に対して常に同一の並び。
 - Error contract: `DomainValidationError.violations` は空でない。同一ロードで検出した structural／semantic／cross_file をすべて含み、要件 5.2 の「拒否理由の報告」をこの 1 例外で満たす。
 
 ### 判定ロジック層（decision/）
@@ -662,21 +716,42 @@ def judge_primary(
     """anomaly_score = 1.0 - max_similarity。anomaly_score > threshold で Positive。"""
 ```
 
+#### axis_matching
+
+| Field        | Detail                                        |
+| ------------ | --------------------------------------------- |
+| Intent       | Phase 0–3 のドメイン軸照合（完全一致＋`any`） |
+| Requirements | 6.2                                           |
+
+##### Responsibilities & Constraints (axis_matching)
+
+- `model/ports.py` の `AxisMatcher` を構造的に充足する Phase 0–3 実装（`ExactAnyAxisMatcher`）。
+- 入力の具体 4 軸から、各軸を `any` に落とした組合せ 2^4 = 16 パターンを生成し、specificity 降順（非 `any` 軸数の多い順）で返す（要件 6.2）。
+- **ドメイン定義に現れない未知ドメインでも** `("any",…)` 等が返るため、広域レコードが引ける。
+- Phase 7 の上位クラス階層実装は ontology パッケージが同 Protocol を満たす別クラスとして提供する。本モジュールは `rdflib` を import しない（`docs/package-dependency-direction.md`）。
+
+##### Service Interface (axis_matching)
+
+```python
+class ExactAnyAxisMatcher:
+    def matching_patterns(self, domain: ConcreteDomainAxes) -> Sequence[DomainPattern]: ...
+```
+
 #### matching
 
 | Field        | Detail                                                   |
 | ------------ | -------------------------------------------------------- |
-| Intent       | 有効レコード集合から入力パッチに適用可能なレコードを選別 |
-| Requirements | 2.1, 2.2, 2.3, 2.6, 5.4, 6.2                             |
+| Intent       | 索引候補から類似度条件で適用対象を選別                   |
+| Requirements | 2.1, 2.2, 2.3, 2.6, 5.4                                  |
 
 ##### Responsibilities & Constraints (matching)
 
-- 適用条件は指定された条件すべての充足（AND。要件 5.4）:
-  1. **ドメイン軸**: レコード由来の 4 軸それぞれが、入力の軸と等しいか `any`（要件 6.2）。**索引引き当て（`DomainSet.candidates`）でこの条件は充足済み**であり、本モジュールは索引が保証する不変条件として前提にする（二重判定はしない）。
-  2. **類似度条件（指定時のみ）**: `match.prototype_ids` のいずれかとの cosine 類似度が `similarity_threshold` 以上（ANY 意味論。根拠は research.md）。未達なら除外（要件 2.3）。
-- 類似度条件を持たないレコードはドメイン軸のみで適用可否が決まるため、そのまま適用対象になる（要件 2.6。ドメイン単位の閾値調整等の広域補正）。
-- 入力は索引で絞り込まれた候補列（`DomainSet.candidates` の戻り値）であり、全有効レコードを受け取らない（設計メモ §10 の線形スキャン禁止）。
-- 類似度は引数で受け取る（`prototype_store` への問い合わせは engine が行い、解決済みの値を渡す）。
+- 適用条件のうち**類似度条件のみ**を評価する（要件 5.4 の動的側）:
+  - **類似度条件（指定時のみ）**: `match.prototype_ids` のいずれかとの cosine 類似度が `similarity_threshold` 以上（ANY 意味論。根拠は research.md）。未達なら除外（要件 2.3）。
+- ドメイン軸条件（要件 6.2）は `DomainSet.candidates`＋`AxisMatcher` で充足済みであり、本モジュールはそれを前提にする（二重判定しない。設計検証 DESIGN-ARCH-008）。
+- 類似度条件を持たないレコードはドメイン軸適合済みのまま適用対象になる（要件 2.6）。
+- 入力は候補列であり、全有効レコードを受け取らない（設計メモ §10）。
+- 類似度は引数で受け取る（ストアへの問い合わせは engine が行い、解決済みの値を渡す）。
 
 ##### Service Interface (matching)
 
@@ -687,7 +762,7 @@ def applicable_records(
 ) -> list[EffectiveRecord]: ...
 ```
 
-- Preconditions: `candidates` の全レコードは入力パッチのドメイン軸に適合済み（索引の不変条件）。
+- Preconditions: `candidates` の全レコードは入力パッチのドメイン軸に適合済み（`AxisMatcher`＋索引の不変条件）。
 
 #### resolution
 
@@ -762,8 +837,8 @@ def apply_correction(
 
 ##### Responsibilities & Constraints (engine)
 
-- 構築時に解決済みの `SimilaritySource`（`model/ports.py` の Protocol。Phase 0–3 では合成 `PrototypeStore` を注入）・`DomainSet`・一次判定閾値を受け取る（要件 1.1 の「実行可能な状態」）。
-- `judge` は: (1) `DomainSet.candidates` で入力ドメインの候補を索引から引く、(2) ストアの `nearest`（一次判定用の最大類似度）と `similarities`（選別用。候補のうち類似度条件を持つレコードが参照する `prototype_ids` の分のみ）で類似度を解決（照会埋め込みの L2 正規化はストア内部で行う）、(3) 一次判定、(4) 候補からの適用対象の選別、(5) 適用対象なしなら一次判定を最終判定へ写像（要件 2.4）、(6) ありなら resolution → correction、(7) `FinalLabel` へ写像（Positive→NG、Negative→許容、保留→要確認。要件 8.1）。
+- 構築時に解決済みの `SimilaritySource`・`AxisMatcher`・`DomainSet`・一次判定閾値を受け取る（要件 1.1 の「実行可能な状態」）。Phase 0–3 の実体はそれぞれ合成 `PrototypeStore`、`ExactAnyAxisMatcher`、`load_domain_set` の戻り値。`domain_loader` 自体には依存しない（設計検証 DESIGN-ARCH-009）。
+- `judge` は: (1) `domain_set.candidates(patch.domain, axis_matcher)` で候補を引く、(2) ストアの `nearest`（一次判定用の最大類似度）と `similarities`（選別用。候補のうち類似度条件を持つレコードが参照する `prototype_ids` の分のみ）で類似度を解決、(3) 一次判定、(4) 候補からの適用対象の選別、(5) 適用対象なしなら一次判定を最終判定へ写像（要件 2.4）、(6) ありなら resolution → correction、(7) `FinalLabel` へ写像（Positive→NG、Negative→許容、保留→要確認。要件 8.1）。
 - 純粋な推論処理であり、内部状態の更新・学習・永続化を一切行わない（要件 8.2、1.4）。
 
 ##### Service Interface (engine)
@@ -771,7 +846,11 @@ def apply_correction(
 ```python
 class CorrectionEngine:
     def __init__(
-        self, store: SimilaritySource, domain_set: DomainSet, primary_threshold: float
+        self,
+        store: SimilaritySource,
+        domain_set: DomainSet,
+        axis_matcher: AxisMatcher,
+        primary_threshold: float,
     ) -> None: ...
     def judge(self, patch: PatchInput) -> FinalJudgment: ...
 ```
@@ -783,7 +862,8 @@ class CorrectionEngine:
 ### ドメインモデル
 
 - **CorrectionRecord**（値オブジェクト）: HITL 由来の補正指示 1 件。`element_id` が同一性のキー。不変。
-- **DomainSet**（集約）: ロード済み全ドメインの有効レコード集合と軸パターン索引。判定時の唯一の参照点。ロード後は不変。
+- **DomainSet**（集約、`model/domain_set.py`）: ロード済み全ドメインの有効レコード集合と軸パターン索引。判定時のレコード参照点。ロード後は不変。
+- **AxisMatcher**（port）: ドメイン軸照合意味論の差し替え口。Phase 0–3 は ExactAny、Phase 7 は階層実装。
 - **PrototypeStore**（集約）: 合成プロトタイプ集合。類似度尺度の権威。構築後は不変。
 - **判定はすべて純粋関数**: 一次判定 → 選別 → 解決 → 補正の各段は入力から出力を導出するのみで、状態を変更しない（要件 8.2 の不変制約）。
 
@@ -802,7 +882,15 @@ class FinalLabel(StrEnum):
     REVIEW_REQUIRED = "ReviewRequired" # 要確認
 
 class DomainAxes(BaseModel):
-    """ドメイン軸。値は具体値または "any"（入力パッチ側の any は不可）。"""
+    """定義側ドメイン軸。各値は具体値または "any"（DomainDefinition／EffectiveRecord 用）。"""
+    process: str
+    material: str
+    equipment: str
+    unit_of_work: str
+
+class ConcreteDomainAxes(BaseModel):
+    """入力側ドメイン軸。any は不可（設計検証 DESIGN-ARCH-010）。
+    いずれかの軸が "any"（大小無視）なら ValidationError。"""
     process: str
     material: str
     equipment: str
@@ -810,8 +898,8 @@ class DomainAxes(BaseModel):
 
 @dataclass(frozen=True)
 class PatchInput:
-    roi_embedding: np.ndarray        # shape (dim,)。照会時の L2 正規化は PrototypeStore が行う
-    domain: DomainAxes               # 入力パッチの具体ドメイン軸（any 不可）
+    roi_embedding: np.ndarray              # shape (dim,)。照会時の L2 正規化は PrototypeStore が行う
+    domain: ConcreteDomainAxes             # 具体ドメイン軸（any 不可。型で強制）
 
 @dataclass(frozen=True)
 class PrimaryJudgment:
@@ -887,7 +975,7 @@ class FinalJudgment:
 
 - **ロード時（構成エラー）**: 不正なドメイン定義は `DomainValidationError` で fail-fast。structural／semantic／cross_file の全違反をファイル別に保持し、拒否理由の報告（要件 5.2）を満たす。部分縮退はしない（有効集合が暗黙に変わると判定結果が静かに変化するため）。
 - **ストア構築時・照会時（契約違反）**: `PrototypeStore.build`／`nearest`／`similarities` の Preconditions 違反（空集合・NaN／Inf・ゼロノルム・次元不一致・不正な `k`）は `ValueError`（設計検証 DESIGN-ARCH-007）。
-- **実行時（契約違反）**: `PatchInput` の embedding 次元不一致・`any` を含む入力ドメイン軸など呼び出し側の契約違反は `ValueError`。検証済み `DomainSet` と構築済みストアを前提とするため、判定パイプライン内部に防御的分岐は置かない。
+- **実行時（契約違反）**: `PatchInput` の embedding 次元不一致は `ValueError`。入力ドメイン軸の `any` は `ConcreteDomainAxes` の構築時に `ValidationError` で拒否する（設計検証 DESIGN-ARCH-010。型の所有者が types）。検証済み `DomainSet` と構築済みストアを前提とするため、判定パイプライン内部に防御的分岐は置かない。
 - **想定内の空集合**: 適用候補なしは正常系（一次判定をそのまま返す。要件 2.4）。エラーにしない（ストア自体の空は構築時に拒否済み）。
 
 ### Monitoring
@@ -907,9 +995,10 @@ Phase 0–3 はテスト駆動の検証段階のためログ基盤は導入し�
 
 ### Integration Tests
 
+- `types`: `ConcreteDomainAxes` がいずれかの軸に `any` を含むと拒否、`DomainAxes` は `any` を許容（DESIGN-ARCH-010）
 - `domain_loader`: 複数ドメイン JSON の合成（6.1）、不正ファイル混在時の fail-fast（5.2）
 - `domain_loader` の違反集約（DESIGN-ARCH-006、要件 5.2／5.3／5.5／5.6）: `load_domain_set` 経由で (a) structural（フィールド欠落）、(b) semantic（action×method 違反・類似度条件の片方だけ・params 方向矛盾）、(c) cross_file（`element_id` 重複。両ファイルのパスが `related_paths` に載る）の各経路が `DomainValidationError` に集約されること。複数種別が混在するロードでも全違反が報告されること
-- `domain_loader` の索引（6.2、設計メモ §10）: `candidates` が返す集合が全レコード走査でドメイン軸照合した結果と一致すること（索引と素朴実装の等価性。hypothesis でランダムなドメイン定義と入力軸に対して検証）、`any` 軸レコードが**ドメイン定義に存在しない未知ドメインの入力**でも引けること、戻り値が specificity 降順かつ入力ファイル順に非依存であること
+- `axis_matching`＋`domain_set`（6.2、設計メモ §10）: `ExactAnyAxisMatcher.matching_patterns` が specificity 降順で 16 パターンを返すこと、`DomainSet.candidates` が返す集合が全レコード走査でドメイン軸照合した結果と一致すること（hypothesis）、`any` 軸レコードが**未知ドメインの入力**でも引けること、戻り値が入力ファイル順に非依存であること
 - `engine` E2E（Phase 1 の確認そのもの）: 一次 Positive のパッチが登録済みプロトタイプ近傍で「許容」に反転する（2.2＋3.1＋8.1）
 - `engine` E2E: 適用候補なしで一次判定がそのまま最終判定になる（2.4）、ReviewRequired 適用で「要確認」（3.4）
 - 削除フォールバック vs KeepPrimary 遮蔽: 同じ広域 `OverrideNegative` の下で、(a) 具体レコードをファイルから消すと広域が効く（6.4）、(b) 具体 `KeepPrimary` を置くと広域が遮蔽され一次判定が通る（7.6）——挙動差を対で固定する
