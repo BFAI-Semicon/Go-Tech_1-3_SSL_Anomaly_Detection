@@ -11,7 +11,7 @@
 - **In scope**（Phase 0–3 相当）:
   - 合成データ（合成プロトタイプ集合と手書きのドメイン別補正定義）のみでの一連の判定処理の検証可能性（Phase 0）
   - ROI 埋め込みとプロトタイプの近傍照合、類似度閾値判定、補正レコード適用による最終判定の最小フロー（Phase 1）
-  - 補正レコードの判定スキーマ全フィールドの解釈：4 action × 3 method＋null、match（prototype_ids／similarity_threshold／scope）、構造検証（フィールド有無・型・enum）による不正定義の拒否、scope の文字列完全一致照合（Phase 2）
+  - 補正レコードの判定スキーマ全フィールドの解釈：4 action × 3 method＋null、match（prototype_ids／similarity_threshold）、構造検証（フィールド有無・型・enum）による不正定義の拒否（Phase 2）
   - 複数ドメインの補正定義の合成（`any` ワイルドカードまで）と、優先順位チェーン（specificity → ReviewRequired 短絡 → safety → recency → element_id）による決定的な競合解決（Phase 3）
 - **Out of scope**:
   - バージョン管理一式：版付き不変アーティファクト・マニフェスト・昇格・ロールバック・element_id 採番カウンタの永続化（Phase 4–6、設計メモ §2–§4・§7）
@@ -80,8 +80,7 @@
 1. When ドメイン別補正定義が読み込まれた, the 補正レイヤ shall 各レコードの element_id・action・method・params・match・recorded_at・attributed_to・source_ref の全フィールドを解釈する。
 2. If 補正定義に必須フィールドの欠落・型不一致・定義外の action もしくは method の値が含まれる, then the 補正レイヤ shall 当該定義を拒否し、拒否理由を報告する。
 3. If action と method の組合せが規約に違反する（KeepPrimary／ReviewRequired に null 以外の method、OverrideNegative／OverridePositive に null の method）, then the 補正レイヤ shall 当該定義を拒否する。
-4. Where match に scope が含まれる, the 補正レイヤ shall scope の値を不透明な文字列として完全一致でのみ照合する。
-5. Where match に複数の条件が含まれる, the 補正レイヤ shall 指定されたすべての条件を満たす入力に対してのみ当該レコードを適用する。
+4. Where 補正レコードに複数の適用条件（ドメイン軸・match の類似度条件）が含まれる, the 補正レイヤ shall 指定されたすべての条件を満たす入力に対してのみ当該レコードを適用する。
 
 ### Requirement 6: 複数ドメイン定義の合成と適用範囲解決
 
@@ -105,7 +104,7 @@
 3. If ReviewRequired で決着しない同一 specificity の競合が生じた, then the 補正レイヤ shall OverridePositive、KeepPrimary、OverrideNegative の順の安全側優先で勝者を決定する。
 4. If safety でも競合が決着しない, then the 補正レイヤ shall recorded_at がより新しいレコードを優先する。
 5. If recency でも競合が決着しない, then the 補正レイヤ shall element_id がより大きいレコードを優先する。
-6. When 具体スコープの KeepPrimary レコードと広域の上書き系レコードが競合した, the 補正レイヤ shall KeepPrimary を勝者として広域補正を遮蔽し、一次判定を最終判定にする。
+6. When 具体ドメインの KeepPrimary レコードと広域の上書き系レコードが競合した, the 補正レイヤ shall KeepPrimary を勝者として広域補正を遮蔽し、一次判定を最終判定にする。
 7. The 補正レイヤ shall 同一の入力と同一の有効レコード集合に対して常に同一の最終判定を返す。
 
 ### Requirement 8: 最終判定の出力と補正の不変制約

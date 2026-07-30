@@ -49,7 +49,10 @@
 - `match.similarity_threshold` の距離尺度の確定：cosine 類似度か L2 距離か、値の大小方向（高いほど近い／低いほど近い）、および FAISS メトリック（`METRIC_INNER_PRODUCT` / `METRIC_L2` 等）・正規化有無との対応。§6.3 の適用条件と §2.1 の kNN が同一尺度であることを保証する。
 - ドメイン・スラッグの採番規則（§4.1）：CURIE（例: `DeepReactiveIonEtchProcess`）からの機械導出か人手命名か（ディレクトリの権威キーは不変 `domain_id`、スラッグは表示ラベル。§4.1）。
 - 採用する SemiKong レイヤ／クラスの確定 IRI 取り込み、およびライセンス法務確認。
-- §9.1 の specificity 判定の厳密化（`match.scope` の部分一致・多軸指定時の具体度スコアの定義）。
+- §9.1 の specificity 判定の厳密化（多軸指定時の具体度スコアの定義。Phase 3 の暫定定義は非 `any` 軸数の比較）。
+- 要素単位 `ontology_version` の要否再検討：`match.scope` の廃止（§6.3）により要素が CURIE 型フィールドを
+  持たなくなったため、要素版タグの対象が存在しない。ドメイン側の `domain_source_ontology_version` で
+  足りるかを確認する。
 - §4.2／§9.1 の上位クラスマッチング方式：有効スナップショットの `ontology_version` に対応する
   `rdfs:subClassOf` 推移閉包をスナップショット生成時に焼き込むか、稼働系がピン留めされた TTL をロードして
   解決するか。多重継承時の specificity（階層距離）と推論範囲も併せて確定する。
