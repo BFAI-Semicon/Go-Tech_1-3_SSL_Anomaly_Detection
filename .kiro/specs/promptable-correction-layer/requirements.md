@@ -56,8 +56,8 @@
 
 #### Acceptance Criteria (Requirement 3)
 
-1. When 一次判定 Positive の入力に OverrideNegative レコードが適用された, the 補正レイヤ shall 二次判定を Negative（許容）にする。
-2. When 一次判定 Negative の入力に OverridePositive レコードが適用された, the 補正レイヤ shall 二次判定を Positive（NG）にする。
+1. When 一次判定 Positive の入力に LabelOverride 方式の OverrideNegative レコードが適用された, the 補正レイヤ shall 二次判定を Negative（許容）にする（ScoreReweight／ThresholdAdapt 方式の二次判定は要件 4.2／4.3 の再計算結果に従う）。
+2. When 一次判定 Negative の入力に LabelOverride 方式の OverridePositive レコードが適用された, the 補正レイヤ shall 二次判定を Positive（NG）にする（ScoreReweight／ThresholdAdapt 方式の二次判定は要件 4.2／4.3 の再計算結果に従う）。
 3. When KeepPrimary レコードが適用された, the 補正レイヤ shall 一次判定を変更せずに保持する。
 4. When ReviewRequired レコードが適用された, the 補正レイヤ shall 最終判定を保留（要確認）とし、人間の確認対象として出力する。
 

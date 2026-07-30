@@ -83,12 +83,13 @@ graph TB
     subgraph model[モデル層（model/）]
         Records[records]
         Types[types]
+        Ports[ports]
     end
     Engine --> Primary
     Engine --> Matching
     Engine --> Resolution
     Engine --> Correction
-    Engine --> Store
+    Engine --> Ports
     Engine --> Loader
     Loader --> Schema
     Loader --> Records
@@ -100,13 +101,15 @@ graph TB
     Correction --> Records
     Correction --> Types
     Records --> Types
+    Store --> Ports
 ```
 
-**依存方向（import-linter の契約で機械検査。違反は CI エラー）**: `model`（`types` → `records`）→ `boundary`（`schema`／`prototype_store` → `domain_loader`）／`decision`（`primary`／`matching`／`correction`／`resolution`）→ `engine`。逆方向 import と循環は禁止。`boundary` と `decision` は互いに import しない。`decision` 内の各モジュールも互いに import しない（`engine` が合成する）。契約の定義は Modified Files の `[tool.importlinter]` を参照。
+**依存方向（import-linter の契約で機械検査。違反は CI エラー）**: `model`（`types`／`ports` → `records`）→ `boundary`（`schema`／`prototype_store` → `domain_loader`）／`decision`（`primary`／`matching`／`correction`／`resolution`）→ `engine`。逆方向 import と循環は禁止。`boundary` と `decision` は互いに import しない。`decision` 内の各モジュールも互いに import しない（`engine` が合成する）。`engine` は boundary の具体ストア型に依存せず、`model/ports.py` の `SimilaritySource` Protocol に依存する（実体は構築時に注入）。契約の定義は Modified Files の `[tool.importlinter]` を参照。
 
 **Key Decisions**:
 
 - 一次判定（`primary`）と合成プロトタイプストア（`prototype_store`）は Phase 8 で実物（primary-anomaly-detection／patch-feature-store）に差し替える seam として独立モジュールに隔離する。
+- `engine` は具体ストア型ではなく `model/ports.py` の `SimilaritySource` Protocol に依存する（設計検証 DESIGN-ARCH-002 対応）。Phase 8 の差し替えは port を満たす実装の注入だけで済み、`engine` と公開 API は変わらない。
 - 類似度計算（照会埋め込みの L2 正規化を含む）は `prototype_store` に一元化し、一次判定と `similarity_threshold` 充足判定が常に同一尺度になることを構造で保証する（要件 2.5）。
 - 設定値（一次判定の固定閾値・ドメイン定義パス）は境界（engine 構築時）で解決し、内部は解決済みの値のみを扱う。類似度も engine がストアで解決し、`primary`／`matching` は解決済みの値を引数で受け取る（ストアへ直接依存しない）。
 
@@ -137,6 +140,7 @@ src/
     ├── model/                   # モデル層（最内側。パッケージ内の誰にも依存しない）
     │   ├── __init__.py
     │   ├── types.py             # コア型: ラベル enum・DomainAxes・PatchInput・PrimaryJudgment・FinalJudgment
+    │   ├── ports.py             # engine が依存する類似度取得 port: SimilaritySource Protocol・NeighborHit
     │   └── records.py           # pydantic モデル: CorrectionRecord・MatchCriteria・Action/Method enum・
     │                            #   method 別 params モデル・action×method 制約バリデータ・
     │                            #   EffectiveRecord（レコード＋由来ドメイン軸）
@@ -174,6 +178,7 @@ tests/
 ### Modified Files
 
 - `pyproject.toml` — dev 依存へ `hypothesis>=6` と `import-linter>=2` を追加。`[tool.pytest.ini_options]` に `pythonpath = ["src"]` と `testpaths = ["tests"]`、`[tool.importlinter]` に下記の依存契約を追加（Phase 0「pytest の整備」）。
+- `.github/workflows/python-ci.yml`（**新規**）— Python 3.12 で `ruff check`・`lint-imports`・`pytest` を実行する CI workflow（Phase 0。設計検証 DESIGN-ARCH-003 対応。下記の依存方向契約の「違反は CI エラー」はこの workflow が担う）。
 
 依存方向の規約は import-linter の契約として機械検査する（`lint-imports` を CI で実行）:
 
@@ -201,11 +206,11 @@ modules = [
 ]
 
 [[tool.importlinter.contracts]]
-name = "model 内は records → types の一方向"
+name = "model 内は records → types／ports の一方向"
 type = "layers"
 layers = [
     "correction_layer.model.records",
-    "correction_layer.model.types",
+    "correction_layer.model.types : correction_layer.model.ports",
 ]
 
 [[tool.importlinter.contracts]]
@@ -222,9 +227,10 @@ layers = [
 ### 段階計画との対応
 
 - **Phase 0**
-  - 新規・拡張対象: `boundary/prototype_store.py`、`tests/conftest.py`、
-    `fixtures/domains/`、`pyproject.toml`（pytest 設定・import-linter 契約）
-  - 完了確認: fixture のロードと kNN 検索が通る
+  - 新規・拡張対象: `model/ports.py`（`NeighborHit`・`SimilaritySource`）、`boundary/prototype_store.py`、
+    `tests/conftest.py`、`fixtures/domains/`、`pyproject.toml`（pytest 設定・import-linter 契約）、
+    `.github/workflows/python-ci.yml`（ruff・`lint-imports`・pytest の CI 配線）
+  - 完了確認: fixture のロードと kNN 検索が通り、CI で lint・依存方向検査・テストが実行される
 - **Phase 1**
   - 新規・拡張対象: `model/types.py`、`decision/primary.py`、`decision/matching.py`（最小）、
     `decision/correction.py`（`OverrideNegative`×`LabelOverride`）、
@@ -256,7 +262,7 @@ flowchart TD
 ```
 
 - 適用候補の選別条件は一次判定の結果に依存しない（類似度・ドメイン軸のみ）。一次判定と選別は独立に計算し、engine が合成する。
-- 類似度は engine が `PrototypeStore` の `nearest`（一次判定用の最大類似度）と `similarities`（選別用の `match.prototype_ids` 類似度。類似度条件を持つレコードの分のみ）で解決し、解決済みの値を一次判定と選別へ渡す（境界での解決）。
+- 類似度は engine が注入された `SimilaritySource`（Phase 0–3 の実体は `PrototypeStore`）の `nearest`（一次判定用の最大類似度）と `similarities`（選別用の `match.prototype_ids` 類似度。類似度条件を持つレコードの分のみ）で解決し、解決済みの値を一次判定と選別へ渡す（境界での解決）。
 - 優先順位チェーンの詳細はコンポーネント `resolution` を参照。
 
 ## 要件トレーサビリティ
@@ -291,10 +297,10 @@ flowchart TD
 - **2.6** 類似度条件なしレコードはドメイン軸のみで適用判定
   - コンポーネント: matching
   - インターフェース／フロー: `applicable_records`（類似度条件の有無で分岐）
-- **3.1** OverrideNegative: Positive→Negative
+- **3.1** LabelOverride 方式の OverrideNegative: Positive→Negative
   - コンポーネント: correction
-  - インターフェース／フロー: `apply_correction`（LabelOverride 経路で直接、soft 方式はスコア経由）
-- **3.2** OverridePositive: Negative→Positive
+  - インターフェース／フロー: `apply_correction`（LabelOverride 経路。soft 方式は要件 4.2／4.3 に従う）
+- **3.2** LabelOverride 方式の OverridePositive: Negative→Positive
   - コンポーネント: correction
   - インターフェース／フロー: 同上
 - **3.3** KeepPrimary: 一次判定を保持
@@ -379,6 +385,10 @@ flowchart TD
   - Req Coverage: 8.1
   - Key Dependencies: pydantic (P0)
   - Contracts: State
+- **ports**（モデル（model/））: engine が依存する類似度取得 port（`SimilaritySource`／`NeighborHit`）
+  - Req Coverage: 1.2, 2.5
+  - Key Dependencies: numpy (P0)
+  - Contracts: Service
 - **records**（モデル（model/））: 補正レコードの型付きモデルと組合せ制約
   - Req Coverage: 4.4, 5.1, 5.3, 5.5, 5.6
   - Key Dependencies: types (P0)
@@ -417,6 +427,31 @@ flowchart TD
   - Contracts: Service
 
 ### モデル層（model/）
+
+#### ports
+
+| Field        | Detail                                            |
+| ------------ | ------------------------------------------------- |
+| Intent       | engine が依存する類似度取得インターフェースの定義 |
+| Requirements | 1.2, 2.5                                          |
+
+##### Responsibilities & Constraints (ports)
+
+- engine が必要とするストア操作（kNN 検索・指定 id 群への類似度計算）を `SimilaritySource` Protocol として定義する。engine は具体ストア型に依存せず、この port にのみ依存する（設計検証 DESIGN-ARCH-002 対応）。
+- 実装（Phase 0–3 は `boundary/prototype_store.py`、Phase 8 は patch-feature-store のアダプタ）は Protocol を構造的に満たせばよく、明示継承しない。差し替えで engine・公開 API は変わらない。
+
+##### Service Interface (ports)
+
+```python
+@dataclass(frozen=True)
+class NeighborHit:
+    prototype_id: int
+    similarity: float   # cosine 類似度
+
+class SimilaritySource(Protocol):
+    def nearest(self, embedding: np.ndarray, k: int = 1) -> list[NeighborHit]: ...
+    def similarities(self, embedding: np.ndarray, prototype_ids: Sequence[int]) -> dict[int, float]: ...
+```
 
 #### records
 
@@ -516,17 +551,12 @@ def validate_domain_document(raw: object) -> list[SchemaViolation]: ...
 
 - プロトタイプ（`prototype_id`＋埋め込み）を保持し、登録時に L2 正規化して `faiss.IndexFlatIP` を構築する。照会埋め込みも `nearest`／`similarities` の内部で L2 正規化する（正規化を呼び出し側に委ねない）。
 - kNN 検索（要件 1.2）と、指定 `prototype_ids` への類似度計算（match 判定用）の両方を提供する。**類似度の定義（L2 正規化を含む）はこのモジュールだけが持つ**（cosine、[-1, 1]、高いほど近い）。要件 2.5 はこの一元化で構造的に保証される。
-- Phase 8 で patch-feature-store の実装に差し替える seam。公開 API はドメイン操作（近傍検索・類似度）のみで、FAISS の型・関数は外に出さない。
+- `model/ports.py` の `SimilaritySource` Protocol を構造的に満たす（明示継承しない）。Phase 8 で patch-feature-store の実装に差し替える seam であり、差し替え先も同 Protocol を満たせば engine・公開 API の変更は不要。公開 API はドメイン操作（近傍検索・類似度）のみで、FAISS の型・関数は外に出さない。
 
 ##### Service Interface (prototype_store)
 
 ```python
-@dataclass(frozen=True)
-class NeighborHit:
-    prototype_id: int
-    similarity: float   # cosine 類似度
-
-class PrototypeStore:
+class PrototypeStore:  # model/ports.py の SimilaritySource を構造的に充足（NeighborHit も ports で定義）
     @classmethod
     def build(cls, prototype_ids: Sequence[int], embeddings: np.ndarray) -> "PrototypeStore": ...
     def nearest(self, embedding: np.ndarray, k: int = 1) -> list[NeighborHit]: ...
@@ -677,7 +707,7 @@ def apply_correction(
 
 ##### Responsibilities & Constraints (engine)
 
-- 構築時に解決済みの `PrototypeStore`・`DomainSet`・一次判定閾値を受け取る（要件 1.1 の「実行可能な状態」）。
+- 構築時に解決済みの `SimilaritySource`（`model/ports.py` の Protocol。Phase 0–3 では合成 `PrototypeStore` を注入）・`DomainSet`・一次判定閾値を受け取る（要件 1.1 の「実行可能な状態」）。
 - `judge` は: (1) ストアの `nearest`（一次判定用の最大類似度）と `similarities`（選別用の `match.prototype_ids` 類似度。類似度条件を持つレコードの分のみ）で類似度を解決（照会埋め込みの L2 正規化はストア内部で行う）、(2) 一次判定、(3) 適用候補の選別、(4) 候補なしなら一次判定を最終判定へ写像（要件 2.4）、(5) 候補ありなら resolution → correction、(6) `FinalLabel` へ写像（Positive→NG、Negative→許容、保留→要確認。要件 8.1）。
 - 純粋な推論処理であり、内部状態の更新・学習・永続化を一切行わない（要件 8.2、1.4）。
 
@@ -686,7 +716,7 @@ def apply_correction(
 ```python
 class CorrectionEngine:
     def __init__(
-        self, store: PrototypeStore, domain_set: DomainSet, primary_threshold: float
+        self, store: SimilaritySource, domain_set: DomainSet, primary_threshold: float
     ) -> None: ...
     def judge(self, patch: PatchInput) -> FinalJudgment: ...
 ```

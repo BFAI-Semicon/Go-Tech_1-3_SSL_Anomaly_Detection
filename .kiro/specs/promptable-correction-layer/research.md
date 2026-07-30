@@ -194,7 +194,7 @@
 - **Selected Approach**: method が二次判定の計算方式を決める。`LabelOverride` は action の方向へ無条件で上書き（要件 3.1・3.2 はこの経路で成立）。`ScoreReweight`／`ThresholdAdapt` は params で再構成したスコア／閾値の比較結果を二次判定とする（パラメータ次第でラベルが変わらないことも設計上の正常動作）。
 - **Rationale**: §6.1／§6.2 が action（効果の方向）と method（方式）を明示的に別軸として定義しており、ソフト方式の存在意義は「スコア経由の緩やかな補正」にある。
 - **Trade-offs**: soft method では action の方向が保証されないが、これは方式比較実験（Phase 8）の観測対象そのものである。
-- **Follow-up**: なし（design.md のコンポーネント定義に反映済み）。
+- **Follow-up**: 設計検証（2026-07-30、DESIGN-ARCH-001）で「要件 3.1／3.2 の無条件な断定と soft method のラベル不変許容が両立しない」と指摘されたため、要件 3.1／3.2 を LabelOverride 方式に限定する改訂を実施（soft 方式の二次判定は要件 4.2／4.3 が規定。承認済み requirements の変更のため再承認が必要）。
 
 ### Decision: 不正なドメイン定義はロード時に fail-fast（例外＋全違反理由の報告）
 
@@ -217,7 +217,19 @@
 - **Selected Approach**: `src/correction_layer/` 単一パッケージを層サブパッケージで構成する: `model/`（コア型・レコード。最内側）、`boundary/`（検証・ロード・ストアの入力境界）、`decision/`（判定ロジック）、`engine.py`（composition root）。依存方向（`model` ← `boundary`／`decision` ← `engine`、`boundary` と `decision` は相互不干渉、`decision` 内は互いに独立）は `import-linter` の layers／independence 契約として `pyproject.toml` に定義し、`lint-imports` を CI で実行する。pytest は `pythonpath = ["src"]` で解決。dev 依存に `hypothesis>=6` と `import-linter>=2` を追加。
 - **Rationale**: 段階計画 Phase 0 の「`src/` パッケージ構成、pytest、ruff の整備」に対応。層名は design.md の層呼称（モデル・入力境界・判定ロジック）と `docs/package-dependency-direction.md` の用語（schema／decision）に揃え、汎用技術レイヤ名を避ける。依存規則の担保を人力レビューから機械検査に格上げする。
 - **Trade-offs**: 階層が 1 段深くなるが、Phase 4 以降で versioning／ontology を外側パッケージとして追加する際の置き場が明確になる。
-- **Follow-up**: 後続 spec が `src/` に参加する際は同じ命名規約（役割ベースの snake_case）に従う。versioning／ontology 追加時は import-linter 契約に外側の層を追記する。
+- **Follow-up**: 後続 spec が `src/` に参加する際は同じ命名規約（役割ベースの snake_case）に従う。versioning／ontology 追加時は import-linter 契約に外側の層を追記する。設計検証（2026-07-30、DESIGN-ARCH-003）で「`lint-imports` を CI で実行すると宣言しながら workflow の計画がない」と指摘されたため、`ruff check`・`lint-imports`・`pytest` を実行する `.github/workflows/python-ci.yml` を Phase 0 のファイル計画に追加した。
+
+### Decision: engine は `SimilaritySource` port（model/ports.py）に依存
+
+- **Context**: 設計検証（2026-07-30、DESIGN-ARCH-002）で、engine の公開シグネチャが合成実装の具体型 `PrototypeStore` を要求しており、「Phase 8 でストアを差し替える seam」という宣言と構造が一致しないと指摘された。
+- **Alternatives Considered**:
+  1. 現状維持 — engine は composition root なので具体型を知ってよい、という立場。ただし公開 API の型注釈が合成実装へ固定され、差し替え時に公開シグネチャの変更が必要になる。
+  2. 消費側（engine 内）で Protocol を定義 — Python の構造的部分型の慣行には沿うが、戻り値型 `NeighborHit` が boundary に残り、port の語彙が 2 層に分裂する。
+  3. `model/ports.py` に `SimilaritySource` Protocol と `NeighborHit` を定義 — engine は port にのみ依存し、`boundary/prototype_store` は Protocol を構造的に充足する（明示継承なし）。依存方向（model ← boundary／engine）が保たれ、port の語彙が最内側に揃う。
+- **Selected Approach**: 3 を採用。import-linter の model 内契約を「`records` → `types`／`ports`」に拡張。
+- **Rationale**: 設計が宣言する Phase 8 seam（ストア差し替えで engine・公開 API 不変）を型レベルで成立させる。指摘のうち「合成ストア・loader の公開」は意図的（Phase 0–3 は合成データで自己完結し、テスト・fixture がストアを構築する）であり、「JSON Schema の `dict[str, Any]`」は pydantic `model_json_schema()` の標準戻り型のため、いずれも変更しない。
+- **Trade-offs**: model 層が numpy 型（`ndarray`）に依存するが、`PatchInput.roi_embedding` が既に保持しており新規の依存ではない。
+- **Follow-up**: Phase 8 で patch-feature-store のアダプタが同 Protocol を満たすことを統合テストで確認する。
 
 ### Decision: Phase 0–3 のドメイン定義 JSON はバージョン管理メタを持たない簡易スキーマ
 
