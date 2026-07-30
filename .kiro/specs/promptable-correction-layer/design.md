@@ -256,7 +256,7 @@ flowchart TD
 ```
 
 - 適用候補の選別条件は一次判定の結果に依存しない（類似度・ドメイン軸のみ）。一次判定と選別は独立に計算し、engine が合成する。
-- 類似度は engine が `PrototypeStore` の `nearest`（一次判定用の最大類似度）と `similarities`（選別用の `match.prototype_ids` 類似度）で解決し、解決済みの値を一次判定と選別へ渡す（境界での解決）。
+- 類似度は engine が `PrototypeStore` の `nearest`（一次判定用の最大類似度）と `similarities`（選別用の `match.prototype_ids` 類似度。類似度条件を持つレコードの分のみ）で解決し、解決済みの値を一次判定と選別へ渡す（境界での解決）。
 - 優先順位チェーンの詳細はコンポーネント `resolution` を参照。
 
 ## 要件トレーサビリティ
@@ -288,6 +288,9 @@ flowchart TD
 - **2.5** similarity_threshold を近傍検索と同一尺度で解釈
   - コンポーネント: prototype_store
   - インターフェース／フロー: cosine 類似度計算の一元化
+- **2.6** 類似度条件なしレコードはドメイン軸のみで適用判定
+  - コンポーネント: matching
+  - インターフェース／フロー: `applicable_records`（類似度条件の有無で分岐）
 - **3.1** OverrideNegative: Positive→Negative
   - コンポーネント: correction
   - インターフェース／フロー: `apply_correction`（LabelOverride 経路で直接、soft 方式はスコア経由）
@@ -323,7 +326,13 @@ flowchart TD
   - インターフェース／フロー: `CorrectionRecord` の model バリデータ
 - **5.4** 複数の適用条件はすべて充足（AND）
   - コンポーネント: matching
-  - インターフェース／フロー: `applicable_records`（prototype_ids・ドメイン軸の全条件）
+  - インターフェース／フロー: `applicable_records`（ドメイン軸＋指定時の類似度条件の全条件）
+- **5.5** 類似度条件の対の片方だけの指定を拒否
+  - コンポーネント: records
+  - インターフェース／フロー: `MatchCriteria` の model バリデータ
+- **5.6** action と params の方向矛盾を拒否
+  - コンポーネント: records
+  - インターフェース／フロー: `CorrectionRecord` の model バリデータ
 - **6.1** 複数ドメインの有効レコードを合成
   - コンポーネント: domain_loader
   - インターフェース／フロー: `load_domain_set` → `DomainSet`
@@ -332,7 +341,7 @@ flowchart TD
   - インターフェース／フロー: ドメイン軸照合（`any` は任意値に一致）
 - **6.3** 具体ドメインを広域より優先
   - コンポーネント: resolution
-  - インターフェース／フロー: specificity（非 `any` 軸数の比較）
+  - インターフェース／フロー: specificity（辞書式: 非 `any` 軸数 → 類似度条件の有無）
 - **6.4** 削除済みレコードは有効集合外・広域へフォールバック
   - コンポーネント: domain_loader
   - インターフェース／フロー: 有効集合＝ファイル記載要素のみ（削除は不在で表現）
@@ -371,7 +380,7 @@ flowchart TD
   - Key Dependencies: pydantic (P0)
   - Contracts: State
 - **records**（モデル（model/））: 補正レコードの型付きモデルと組合せ制約
-  - Req Coverage: 4.4, 5.1, 5.3
+  - Req Coverage: 4.4, 5.1, 5.3, 5.5, 5.6
   - Key Dependencies: types (P0)
   - Contracts: State
 - **schema**（入力境界（boundary/））: JSON Schema 生成と raw 文書の構造検証
@@ -391,7 +400,7 @@ flowchart TD
   - Key Dependencies: types (P0)
   - Contracts: Service
 - **matching**（判定ロジック（decision/））: 適用レコード選別（解決済み類似度を受領）
-  - Req Coverage: 2.1–2.3, 5.4, 6.2
+  - Req Coverage: 2.1–2.3, 2.6, 5.4, 6.2
   - Key Dependencies: records (P0), types (P0)
   - Contracts: Service
 - **resolution**（判定ロジック（decision/））: 優先順位チェーンによる競合解決
@@ -414,13 +423,15 @@ flowchart TD
 | Field        | Detail                                                 |
 | ------------ | ------------------------------------------------------ |
 | Intent       | 補正レコード・ドメイン定義の pydantic モデルと不変条件 |
-| Requirements | 4.4, 5.1, 5.3                                          |
+| Requirements | 4.4, 5.1, 5.3, 5.5, 5.6                                |
 
 ##### Responsibilities & Constraints (records)
 
 - 判定スキーマの 8 フィールド（設計メモ §6.3 のうち要素単位 `ontology_version`（Phase 7 責務）を除く。requirements 5.1 の列挙と同一）を型付きで表現する。スキーマ定義の単一の権威。
 - action×method の組合せ規約（`KeepPrimary`／`ReviewRequired` は method null かつ params 空、`OverrideNegative`／`OverridePositive` は method 非 null）を model バリデータで強制する。
 - method 別の params 形（`LabelOverride`→`{}`、`ScoreReweight`→`{"weight": float > 0}`、`ThresholdAdapt`→`{"threshold_delta": float}`）を検証する。未知フィールドは拒否（`extra="forbid"`）。
+- `match` の類似度条件（`prototype_ids`／`similarity_threshold`）は**対で任意**とする。両方あり＝プロトタイプ照合つき、両方なし（`"match": {}`）＝ドメイン軸のみで適用する広域レコード（要件 2.6）。片方だけの指定は model バリデータで拒否する（要件 5.5）。
+- soft method の params と action の方向整合（`OverrideNegative` は `weight` < 1／`threshold_delta` > 0、`OverridePositive` は `weight` > 1／`threshold_delta` < 0）を model バリデータで強制する（要件 5.6）。
 - `recorded_at` はタイムゾーン付き（UTC）を必須とする。
 - 有効レコードの共有型 `EffectiveRecord`（レコード＋由来ドメイン軸）を定義する。生成は domain_loader、消費は matching／resolution が行い、両者はこのモジュールの型のみに依存する。
 - `DomainAxes` は `model/types.py` の定義を import して使う（このモジュールでは定義しない）。
@@ -440,8 +451,10 @@ class Method(StrEnum):
     THRESHOLD_ADAPT = "ThresholdAdapt"
 
 class MatchCriteria(BaseModel):
-    prototype_ids: list[int]          # min_length=1、int64 整数
-    similarity_threshold: float       # cosine 類似度（高いほど近い）。充足は「類似度 >= threshold」
+    # 類似度条件は対で任意（両方 None＝ドメイン軸のみで適用する広域レコード。要件 2.6。
+    # 片方だけの指定は model バリデータで拒否。要件 5.5）
+    prototype_ids: list[int] | None = None      # 指定時 min_length=1、int64 整数
+    similarity_threshold: float | None = None   # cosine 類似度（高いほど近い）。充足は「類似度 >= threshold」
 
 class CorrectionRecord(BaseModel):
     element_id: int
@@ -463,7 +476,7 @@ class EffectiveRecord:
     domain: DomainAxes        # 由来ドメイン定義の軸（specificity 判定に使用）
 ```
 
-- Invariants: action×method 規約（要件 5.3）と params 形は構築時に検証され、構築後のレコードは常に整合している。
+- Invariants: action×method 規約（要件 5.3）・params 形・類似度条件の対制約（要件 5.5）・action×params の方向整合（要件 5.6）は構築時に検証され、構築後のレコードは常に整合している。
 
 ### 入力境界層（boundary/）
 
@@ -577,13 +590,14 @@ def judge_primary(
 | Field        | Detail                                                   |
 | ------------ | -------------------------------------------------------- |
 | Intent       | 有効レコード集合から入力パッチに適用可能なレコードを選別 |
-| Requirements | 2.1, 2.2, 2.3, 5.4, 6.2                                  |
+| Requirements | 2.1, 2.2, 2.3, 2.6, 5.4, 6.2                             |
 
 ##### Responsibilities & Constraints (matching)
 
-- 適用条件は次のすべての充足（AND。要件 5.4）:
+- 適用条件は指定された条件すべての充足（AND。要件 5.4）:
   1. **ドメイン軸**: レコード由来の 4 軸それぞれが、入力の軸と等しいか `any`（要件 6.2）。
-  2. **prototype_ids**: `match.prototype_ids` のいずれかとの cosine 類似度が `similarity_threshold` 以上（ANY 意味論。根拠は research.md）。未達なら除外（要件 2.3）。
+  2. **類似度条件（指定時のみ）**: `match.prototype_ids` のいずれかとの cosine 類似度が `similarity_threshold` 以上（ANY 意味論。根拠は research.md）。未達なら除外（要件 2.3）。
+- 類似度条件を持たないレコードはドメイン軸のみで適用可否を判定する（要件 2.6。ドメイン単位の閾値調整等の広域補正）。
 - 類似度は引数で受け取る（`prototype_store` への問い合わせは engine が行い、解決済みの値を渡す）。
 
 ##### Service Interface (matching)
@@ -606,7 +620,7 @@ def applicable_records(
 ##### Responsibilities & Constraints (resolution)
 
 - 優先順位チェーン（設計メモ §9.1、要件 7.1）:
-  1. **specificity**: 非 `any` ドメイン軸数（0–4）の比較。大きい方が勝つ（要件 6.3。暫定定義の根拠と Phase 7 での再検証は research.md）。具体 `KeepPrimary` はここで広域上書きに勝ち、補正を遮蔽する（要件 7.6）。
+  1. **specificity**: 辞書式比較（第 1 キー: 非 `any` ドメイン軸数 0–4、第 2 キー: `match` の類似度条件の有無。条件ありが具体側）。大きい方が勝つ（要件 6.3。暫定定義の根拠と Phase 7 での再検証は research.md）。具体 `KeepPrimary` はここで広域上書きに勝ち、補正を遮蔽する（要件 7.6）。ドメイン軸が同点なら、プロトタイプ照合で絞られたレコードがドメイン全域に効くレコード（類似度条件なし）に勝つ。
   2. **`ReviewRequired` 短絡**: 最大 specificity の勝ち集合に `ReviewRequired` が 1 つでもあれば、以降を打ち切り保留（要件 7.2、3.4）。短絡は同 specificity 内でのみ効く（specificity に従属）。
   3. **safety**: `OverridePositive` > `KeepPrimary` > `OverrideNegative`（要件 7.3）。
   4. **recency**: `recorded_at` が新しい方（要件 7.4）。
@@ -664,7 +678,7 @@ def apply_correction(
 ##### Responsibilities & Constraints (engine)
 
 - 構築時に解決済みの `PrototypeStore`・`DomainSet`・一次判定閾値を受け取る（要件 1.1 の「実行可能な状態」）。
-- `judge` は: (1) ストアの `nearest`（一次判定用の最大類似度）と `similarities`（選別用の `match.prototype_ids` 類似度）で類似度を解決（照会埋め込みの L2 正規化はストア内部で行う）、(2) 一次判定、(3) 適用候補の選別、(4) 候補なしなら一次判定を最終判定へ写像（要件 2.4）、(5) 候補ありなら resolution → correction、(6) `FinalLabel` へ写像（Positive→NG、Negative→許容、保留→要確認。要件 8.1）。
+- `judge` は: (1) ストアの `nearest`（一次判定用の最大類似度）と `similarities`（選別用の `match.prototype_ids` 類似度。類似度条件を持つレコードの分のみ）で類似度を解決（照会埋め込みの L2 正規化はストア内部で行う）、(2) 一次判定、(3) 適用候補の選別、(4) 候補なしなら一次判定を最終判定へ写像（要件 2.4）、(5) 候補ありなら resolution → correction、(6) `FinalLabel` へ写像（Positive→NG、Negative→許容、保留→要確認。要件 8.1）。
 - 純粋な推論処理であり、内部状態の更新・学習・永続化を一切行わない（要件 8.2、1.4）。
 
 ##### Service Interface (engine)
@@ -752,12 +766,23 @@ class FinalJudgment:
       "recorded_at": "2026-06-20T10:00:00Z",
       "attributed_to": "op_tanaka",
       "source_ref": "annotation:ann-5700"
+    },
+    {
+      "element_id": 91,
+      "action": "OverrideNegative",
+      "method": "ThresholdAdapt",
+      "params": { "threshold_delta": 0.05 },
+      "match": {},
+      "recorded_at": "2026-07-30T09:00:00Z",
+      "attributed_to": "op_sato",
+      "source_ref": "annotation:ann-5931"
     }
   ]
 }
 ```
 
 - `elements[]` のレコード形は、設計メモ §6.3 のうち要素単位 `ontology_version`（オントロジー統合、Phase 7 責務）を除く 8 フィールド（requirements 5.1・段階計画 Phase 2 の列挙と同一）。llm-feedback-structuring との共有語彙。
+- `match` の類似度条件は対で任意。`"match": {}` はドメイン軸のみで適用される広域レコード（上例 `element_id: 91`。当該ドメイン全域の判定閾値を調整する）。片方だけの指定は構造検証で拒否する（要件 5.5）。
 - トップレベルのバージョン管理メタ（`domain_id`／`domain_version`／`domain_source_ontology_version`／`target_ontology_version`／`built_against_bank_snapshot_id`／`domain_representations_by_ontology_version`。§8.1）は**含めない**（`domain_id`／`domain_version` は Phase 4、`built_against_bank_snapshot_id` は Phase 5、オントロジー系 3 フィールドは Phase 7 の責務。根拠は research.md）。
 - CURIE 形式の値（ドメイン軸の `semicont:...` 等）は本スコープでは**不透明文字列**であり、解釈・実在検証を行わない。
 - action×method の許容組合せ:
@@ -787,11 +812,11 @@ Phase 0–3 はテスト駆動の検証段階のためログ基盤は導入し�
 
 ### Unit Tests
 
-- `records`: 8 フィールド全解釈（5.1）、action×method の許容・拒否の全 8 組合せ（4.4、5.3）、params 形の検証（weight ≤ 0 拒否・未知キー拒否）、`recorded_at` の非 UTC 拒否
+- `records`: 8 フィールド全解釈（5.1）、action×method の許容・拒否の全 8 組合せ（4.4、5.3）、params 形の検証（weight ≤ 0 拒否・未知キー拒否）、類似度条件の対制約（片方だけの指定を拒否。5.5）、action×params の方向矛盾の拒否（5.6）、`recorded_at` の非 UTC 拒否
 - `schema`: フィールド欠落・型不一致・enum 定義外それぞれの違反レポート内容（5.2）、複数違反の全件報告
 - `prototype_store`: 既知ベクトルでの kNN の id・類似度の厳密値（1.2）、`similarities` の一致性（2.5: `nearest` と同値になること）、未正規化の照会ベクトルが正規化済み入力と同一結果になること（照会時 L2 正規化のストア一元化の契約）
 - `primary`: `anomaly_score > threshold` の境界値（等号側は Negative）（1.3）
-- `matching`: 閾値ちょうど（≥ で充足）・未達除外（2.2、2.3）、複数条件 AND（5.4）、`any` 軸の広域適用（6.2）
+- `matching`: 閾値ちょうど（≥ で充足）・未達除外（2.2、2.3）、複数条件 AND（5.4）、`any` 軸の広域適用（6.2）、類似度条件なしレコードのドメイン軸のみ適用（2.6）
 - `correction`: 4 action × 適用可能 method の全経路の一次→二次変換（3.1–3.3、4.1–4.3）
 
 ### Integration Tests
@@ -804,4 +829,4 @@ Phase 0–3 はテスト駆動の検証段階のためログ基盤は導入し�
 ### Property-Based Tests（hypothesis）
 
 - `resolution` の総順序性質（7.7）: ランダム生成レコード集合に対し (a) 勝者の一意性、(b) 2 レコード比較の反対称性・推移律、(c) 同一入力の決定性（複数回実行で不変）、(d) 同時刻 `recorded_at`・同 specificity でも必ず決着（全域性）
-- テーブル駆動テスト: チェーン各段（specificity 差・ReviewRequired 短絡・safety 順・recency・element_id）で決着する競合ケースを段ごとに網羅（7.1–7.5、6.3）——設計上最も壊れやすい部分として厚めに固定する
+- テーブル駆動テスト: チェーン各段（specificity 差（ドメイン軸数・類似度条件の有無の両キー）・ReviewRequired 短絡・safety 順・recency・element_id）で決着する競合ケースを段ごとに網羅（7.1–7.5、6.3）——設計上最も壊れやすい部分として厚めに固定する

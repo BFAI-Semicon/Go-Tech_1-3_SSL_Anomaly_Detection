@@ -10,6 +10,7 @@
   - 優先順位チェーン（§9.1）は「総順序である」という数学的性質が要件（7.7 の決定性）であり、`hypothesis` による property-based testing の採用が `docs/library-adoption-proposal.md` §2 で指定済み。ルールエンジンの採用は同 §7 で明示的に見送り（決定性・監査可能性のため自作＋hypothesis が正解）。
   - `src/` 配下にソースコードは存在しない（`pyproject.toml`・`docs/`・`.kiro/` のみ）。既存パターンの踏襲対象はなく、パッケージ構成は本設計で新規決定する。
   - 設計レビュー（2026-07-29）で `match.scope` を廃止した。推論時に値が確定しないキー（`defect_class` 等）は照合不能であり、適用条件はドメイン軸＋プロトタイプ類似度の 2 系統に限定する（下記 Design Decisions）。
+  - 設計レビュー（2026-07-30）で `match` の類似度条件（`prototype_ids`／`similarity_threshold`）を対で任意化した。類似度条件を持たないレコードはドメイン軸のみで適用される広域補正（ドメイン単位の閾値調整等）を表す（下記 Design Decisions）。
 
 ## Research Log
 
@@ -66,8 +67,8 @@
 
 - **Context**: §9.1 は「`domain` タプルがより具体的な方を優先（完全指定 > `any`）」とするが、多軸指定時の具体度スコアの厳密定義は §13 で未決。Phase 3 の決定的な競合解決（要件 6.3・7.1）には定義の確定が必要。ただし上位クラス階層（Phase 7）を含む完全な厳密化は本スコープ外。
 - **Sources Consulted**: `docs/structured-json-versioning/correction-layer.md` §9.1、`docs/structured-json-versioning/versioning-model.md` §4.2（合成順: 装置指定 → 材料指定 → 工程全体 `any`）、`docs/structured-json-versioning/operations.md` §13
-- **Findings**: §4.2 の合成順はドメイン軸の具体指定数に基づく順序である。当初案は第 2 キーに `match.scope` の条件キー数を置く辞書式比較だったが、`match.scope` 自体の廃止（下記 Design Decisions）により第 2 キーは消滅した。
-- **Implications**: Phase 3 では「非 `any` ドメイン軸数（0–4）の比較」を暫定定義として採用（下記 Design Decisions）。Phase 7 の上位クラス階層導入時に再検証が必要（Revalidation Trigger として design.md に記録）。
+- **Findings**: §4.2 の合成順はドメイン軸の具体指定数に基づく順序である。当初案は第 2 キーに `match.scope` の条件キー数を置く辞書式比較だったが、`match.scope` 自体の廃止（下記 Design Decisions）により第 2 キーはいったん消滅した。その後、類似度条件の任意化（下記 Design Decisions）により「同一ドメイン軸数でも適用範囲の粒度が異なる」ケースが生じ、第 2 キーとして類似度条件の有無を再導入した。
+- **Implications**: Phase 3 では「辞書式比較（第 1 キー: 非 `any` ドメイン軸数 0–4、第 2 キー: 類似度条件の有無）」を暫定定義として採用（下記 Design Decisions）。Phase 7 の上位クラス階層導入時に再検証が必要（Revalidation Trigger として design.md に記録）。
 
 ### `match.scope` の要否（設計レビューによる廃止）
 
@@ -160,16 +161,29 @@
 - **Trade-offs**: ドメイン軸に収まらない推論時既知の条件が将来必要になった場合の表現手段を当面持たない。その場合はドメイン軸の追加（design.md Revalidation Triggers「ドメイン軸の変更」）か、optional フィールドとしての scope 再導入（後方互換な追加）で対応する。
 - **Follow-up**: 判定スキーマは llm-feedback-structuring と共有する語彙のため、設計メモ §6.3・§9.1・§8.1 サンプルを同時に更新した（Revalidation Trigger「フィールド名・型・enum 値の変更」に該当）。
 
-### Decision: specificity の暫定定義（非 any ドメイン軸数の比較）
+### Decision: specificity の暫定定義（辞書式: 非 any ドメイン軸数 → 類似度条件の有無）
 
-- **Context**: §9.1 の specificity 判定の厳密化は §13 で未決だが、要件 6.3・7.1 の決定的競合解決には定義が必要。本スコープは `any` ワイルドカードのみ（上位クラス階層なし）。
+- **Context**: §9.1 の specificity 判定の厳密化は §13 で未決だが、要件 6.3・7.1 の決定的競合解決には定義が必要。本スコープは `any` ワイルドカードのみ（上位クラス階層なし）。類似度条件の任意化（下記 Decision）により、同一ドメイン軸数でも「プロトタイプ照合で絞られたレコード」と「ドメイン全域に効くレコード」の粒度差が生じる。
 - **Alternatives Considered**:
   1. 辞書式比較（第 1 キー: 非 `any` ドメイン軸数 0–4、第 2 キー: `match.scope` の条件キー数）— 当初案。`match.scope` の廃止により第 2 キーが消滅した。
-  2. 非 `any` ドメイン軸数（0–4）の単純比較 — §4.2 の合成順（ドメイン軸の具体指定が第一）に整合し、廃止後のスキーマで定義可能な唯一の具体度。
-- **Selected Approach**: 非 `any` ドメイン軸数（0–4）の比較。大きい方が具体的。同点は優先順位チェーンの後続段（ReviewRequired 短絡 → safety → recency → element_id）で決着する。
-- **Rationale**: §4.2 の「装置指定 → 材料指定 → 工程全体（`any`）」の合成順はドメイン軸の具体数に基づく順序である。
+  2. 非 `any` ドメイン軸数（0–4）の単純比較 — ドメイン全域のレコード（類似度条件なし）とプロトタイプ照合つきレコードが同点になり、広域の閾値調整が個別補正を recency で上書きしうる。
+  3. 辞書式比較（第 1 キー: 非 `any` ドメイン軸数 0–4、第 2 キー: 類似度条件の有無）— 適用範囲が狭い（＝より具体的な意図の）レコードが常に勝つ。
+- **Selected Approach**: 3 を採用。第 1 キーで大きい方、同点なら類似度条件ありが勝つ。なお同点は優先順位チェーンの後続段（ReviewRequired 短絡 → safety → recency → element_id）で決着する。
+- **Rationale**: §4.2 の「装置指定 → 材料指定 → 工程全体（`any`）」の合成順はドメイン軸の具体数に基づく順序であり、第 2 キーは「specificity＝適用範囲の狭さ」という同じ原理を `match` 条件へ延長したもの。
 - **Trade-offs**: Phase 7 で上位クラス階層（階層距離）が入ると再定義が必要。`decision/resolution.py` に定義を局所化して差し替え可能にする。
 - **Follow-up**: Phase 7 着手時に上位クラスマッチを含めて再検証（design.md の Revalidation Triggers に記載）。
+
+### Decision: `match` の類似度条件は対で任意（類似度条件なし＝ドメイン軸のみの広域補正）
+
+- **Context**: 設計レビュー（2026-07-30）で「特定ドメイン（装置・材料）だけ判定閾値を調整する」ような、参照する入力パッチ（プロトタイプ）を持たない補正のユースケースが提起された。従来スキーマは `match.prototype_ids`（min_length=1）と `similarity_threshold` が必須で、この種のレコードを表現できない。
+- **Alternatives Considered**:
+  1. 類似度条件を必須のまま維持 — `similarity_threshold` を極端に下げて全マッチさせるハックでしか表現できず、意図が読めないレコードになる。
+  2. `match` フィールド自体を省略可能にする — 要件 5.1 の 8 フィールド解釈（全フィールドの列挙）と llm-feedback-structuring との共有語彙の形を崩す。
+  3. `prototype_ids`／`similarity_threshold` を対で任意にする — `match` は必須のまま、`{}` で「類似度条件なし」を表す。片方だけの指定は構造検証で拒否。
+- **Selected Approach**: 3 を採用。matching は「指定された条件のみの AND」（要件 5.4 の文言どおり）で評価し、類似度条件を持たないレコードはドメイン軸のみで適用可否を判定する（要件 2.6）。あわせて specificity を辞書式（非 `any` 軸数 → 類似度条件の有無）に拡張し（上記 Decision）、ドメイン全域のレコードが同ドメインのプロトタイプ照合レコードを recency で上書きしないようにする。さらに soft method の params と action の方向整合（`OverrideNegative` は `weight` < 1／`threshold_delta` > 0、`OverridePositive` は逆）を構造検証で強制する（要件 5.6。広域 `ThresholdAdapt` は params の符号が実効果を決めるため、action との矛盾定義の混入リスクが高い）。
+- **Rationale**: 要件 5.4 は元々「指定されたすべての条件を満たす」という AND の意味論であり、条件の欠如＝恒真は自然な拡張。ドメイン軸照合・specificity・優先順位チェーンはプロトタイプと独立に動作するため、判定パイプラインの構造変更を伴わない。
+- **Trade-offs**: 類似度条件なしの `OverrideNegative` 方向レコード（閾値引き上げ等）は、当該ドメイン全域の感度を下げる最も影響の大きい形のレコードになる。運用ガードレール（`threshold_delta`／`weight` の許容範囲、広域レコードの承認フローの重さ）は設計メモ §13 の未決事項とした。
+- **Follow-up**: 判定スキーマは llm-feedback-structuring と共有する語彙のため、設計メモ §6.2・§6.3・§9.1・§13 を同時に更新した（Revalidation Trigger「フィールド名・型・enum 値の変更」に該当。JSON Schema 成果物の再配布）。
 
 ### Decision: action と method の役割分担（soft method はスコア経由で二次判定を導出）
 

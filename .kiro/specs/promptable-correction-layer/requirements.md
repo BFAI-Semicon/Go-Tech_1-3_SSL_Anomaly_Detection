@@ -11,7 +11,7 @@
 - **In scope**（Phase 0–3 相当）:
   - 合成データ（合成プロトタイプ集合と手書きのドメイン別補正定義）のみでの一連の判定処理の検証可能性（Phase 0）
   - ROI 埋め込みとプロトタイプの近傍照合、類似度閾値判定、補正レコード適用による最終判定の最小フロー（Phase 1）
-  - 補正レコードの判定スキーマ全フィールドの解釈：4 action × 3 method＋null、match（prototype_ids／similarity_threshold）、構造検証（フィールド有無・型・enum）による不正定義の拒否（Phase 2）
+  - 補正レコードの判定スキーマ全フィールドの解釈：4 action × 3 method＋null、match（prototype_ids／similarity_threshold の対、または類似度条件なし＝ドメイン軸のみで適用）、構造検証（フィールド有無・型・enum）による不正定義の拒否（Phase 2）
   - 複数ドメインの補正定義の合成（`any` ワイルドカードまで）と、優先順位チェーン（specificity → ReviewRequired 短絡 → safety → recency → element_id）による決定的な競合解決（Phase 3）
 - **Out of scope**:
   - バージョン管理一式：版付き不変アーティファクト・マニフェスト・昇格・ロールバック・element_id 採番カウンタの永続化（Phase 4–6、設計メモ §2–§4・§7）
@@ -48,6 +48,7 @@
 3. If プロトタイプとの類似度が similarity_threshold の条件に達しない, then the 補正レイヤ shall 当該補正レコードを適用対象から除外する。
 4. If 適用対象の補正レコードが存在しない, then the 補正レイヤ shall 一次判定をそのまま最終判定として返す。
 5. The 補正レイヤ shall match の similarity_threshold を近傍検索と同一の類似度尺度で解釈する。
+6. Where 補正レコードの match が類似度条件（prototype_ids／similarity_threshold）を持たない, the 補正レイヤ shall ドメイン軸の条件のみで当該レコードの適用可否を判定する。
 
 ### Requirement 3: 補正操作（action）の解釈
 
@@ -81,6 +82,8 @@
 2. If 補正定義に必須フィールドの欠落・型不一致・定義外の action もしくは method の値が含まれる, then the 補正レイヤ shall 当該定義を拒否し、拒否理由を報告する。
 3. If action と method の組合せが規約に違反する（KeepPrimary／ReviewRequired に null 以外の method、OverrideNegative／OverridePositive に null の method）, then the 補正レイヤ shall 当該定義を拒否する。
 4. Where 補正レコードに複数の適用条件（ドメイン軸・match の類似度条件）が含まれる, the 補正レイヤ shall 指定されたすべての条件を満たす入力に対してのみ当該レコードを適用する。
+5. If match に prototype_ids と similarity_threshold の一方だけが指定されている, then the 補正レイヤ shall 当該定義を拒否する。
+6. If ScoreReweight もしくは ThresholdAdapt の params の値が action の方向と矛盾する（OverrideNegative に weight ≥ 1 もしくは threshold_delta ≤ 0、OverridePositive に weight ≤ 1 もしくは threshold_delta ≥ 0）, then the 補正レイヤ shall 当該定義を拒否する。
 
 ### Requirement 6: 複数ドメイン定義の合成と適用範囲解決
 

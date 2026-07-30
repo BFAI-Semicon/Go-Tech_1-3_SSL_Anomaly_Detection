@@ -49,7 +49,8 @@
 - `match.similarity_threshold` の距離尺度の確定：cosine 類似度か L2 距離か、値の大小方向（高いほど近い／低いほど近い）、および FAISS メトリック（`METRIC_INNER_PRODUCT` / `METRIC_L2` 等）・正規化有無との対応。§6.3 の適用条件と §2.1 の kNN が同一尺度であることを保証する。
 - ドメイン・スラッグの採番規則（§4.1）：CURIE（例: `DeepReactiveIonEtchProcess`）からの機械導出か人手命名か（ディレクトリの権威キーは不変 `domain_id`、スラッグは表示ラベル。§4.1）。
 - 採用する SemiKong レイヤ／クラスの確定 IRI 取り込み、およびライセンス法務確認。
-- §9.1 の specificity 判定の厳密化（多軸指定時の具体度スコアの定義。Phase 3 の暫定定義は非 `any` 軸数の比較）。
+- §9.1 の specificity 判定の厳密化（多軸指定時の具体度スコアの定義。Phase 3 の暫定定義は辞書式：
+  非 `any` 軸数 → `match` 類似度条件の有無）。
 - 要素単位 `ontology_version` の要否再検討：`match.scope` の廃止（§6.3）により要素が CURIE 型フィールドを
   持たなくなったため、要素版タグの対象が存在しない。ドメイン側の `domain_source_ontology_version` で
   足りるかを確認する。
@@ -58,6 +59,9 @@
   見逃し由来は `kind=defect`。§2.1）し、その id を参照する」（最近傍の既存 id を借りる方式は、過検出側では
   類似度が閾値に届かず、見逃し側では正常と分離できないため不採用）。登録→採番→レコード発行の順序と
   `built_against_bank_snapshot_id` との関係を patch-feature-store／llm-feedback-structuring の spec で確定する。
+- 類似度条件なし広域レコード（§6.3。ドメイン単位の閾値調整等）の運用ガードレール：`threshold_delta`／
+  `weight` の許容範囲と、広域 `OverrideNegative` 方向（ドメイン全域の感度低下＝見逃しリスク）に対する
+  承認フローの重さ。
 - §4.2／§9.1 の上位クラスマッチング方式：有効スナップショットの `ontology_version` に対応する
   `rdfs:subClassOf` 推移閉包をスナップショット生成時に焼き込むか、稼働系がピン留めされた TTL をロードして
   解決するか。多重継承時の specificity（階層距離）と推論範囲も併せて確定する。

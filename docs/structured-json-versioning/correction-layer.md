@@ -37,6 +37,9 @@
 | `null`           | `action` が `KeepPrimary` / `ReviewRequired` のとき |
 
 方向（`action`）× 方式（`method`）の 2 次元で表現し、`params` に方式ごとのパラメータを持たせる。
+`params` の値は `action` の方向と整合しなければならない（`OverrideNegative` は `weight` < 1／
+`threshold_delta` > 0、`OverridePositive` は `weight` > 1／`threshold_delta` < 0。矛盾する定義は
+構造検証（§11 の 1 段目）で拒否する）。
 
 ### 6.3 レコードのフィールド
 
@@ -53,7 +56,9 @@
   state）と独立監査ログの backstop で保証する。次 ID を現行ドメインファイルの最大値やアクティブなマニフェスト
   から導出してはならない（§3.1）。ID の大小に政策的意味はない（意図的な順序は `priority.json`）
 - `action` / `method` / `params`: 上記 2 軸
-- `match`: 適用条件（`prototype_ids` / `similarity_threshold`）。
+- `match`: 適用条件。類似度条件（`prototype_ids` / `similarity_threshold`）は**対で任意**：両方あり＝
+  プロトタイプ照合つき、両方なし（`{}`）＝ドメイン軸のみで適用する広域補正（例：特定装置のドメインだけ
+  判定閾値を調整する `ThresholdAdapt`）。片方だけの指定は構造検証（§11 の 1 段目）で拒否する。
   `similarity_threshold` の距離尺度（cosine / L2 と FAISS メトリックの対応）は未決（§13）
   - 旧 `scope`（ドメイン軸以外の付帯条件。`defect_class` 等）は**廃止**：一次判定は欠陥種別を出さないため
     推論時に値が確定せず照合不能で、判定の来歴は `source_ref` 先の監査ログが受け持つ。推論時に既知の
@@ -98,6 +103,9 @@
 
 1. **specificity**：`domain` タプルがより具体的な方を優先
    （完全指定 > `any` / 上位クラス。§4.2 のドメイン合成規則と同一の考え方）。
+   - **ドメイン軸が同点なら `match` の類似度条件の有無を第 2 キーとする**：プロトタイプ照合で絞られた
+     レコード（類似度条件あり）が、ドメイン全域に効く広域レコード（類似度条件なし。§6.3）より具体的
+     として勝つ（specificity＝適用範囲の狭さ、の同一原理）。
    - `KeepPrimary` もここに参加する。**具体ドメインの `KeepPrimary` は広域の補正（`OverrideNegative` /
      `OverridePositive`）に勝ち、そのドメインでは補正を遮蔽して一次判定を通す**（能動マスク）。
    - **安全上の注意**：`KeepPrimary` は specificity で勝つため、広域の `OverridePositive`（見逃し救済）も
