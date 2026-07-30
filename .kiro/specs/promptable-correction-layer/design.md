@@ -28,7 +28,7 @@
 - 補正レイヤの判定ロジック本体: 一次判定（合成）→ 適用レコード選別 → 競合解決 → 補正適用 → 最終判定（NG／許容／要確認）
 - 補正レコード判定スキーマ（`element_id`／`action`／`method`／`params`／`match`／`recorded_at`／`attributed_to`／`source_ref`）の**消費側の解釈と構造検証**、および pydantic モデルから生成する JSON Schema 成果物
 - Phase 0–3 限定の簡易ドメイン定義 JSON（ドメイン軸 4 つ＋`elements[]`）というフィクスチャ契約
-- 優先順位チェーン（specificity → `ReviewRequired` 短絡 → safety → recency → `element_id`）の実装と、その総順序性質の検証
+- 優先順位チェーン（specificity → `ReviewRequired` 短絡 → safety → recency → `element_id`）の実装と、その決定性（解決結果の一意性・入力順非依存・全域性）の検証
 
 ### Out of Boundary
 
@@ -124,7 +124,8 @@ graph TB
 - **構造検証**: `jsonschema>=4.21`。raw JSON への構造検証と違反レポート。
   pydantic 生成スキーマを適用。
 - **テスト**: `pytest>=8`、`hypothesis>=6`（**新規追加**）。
-  単体・E2E・総順序の property-based testing。`docs/library-adoption-proposal.md` §2。
+  単体・E2E・優先順位チェーンの決定性・索引等価性の property-based testing。
+  `docs/library-adoption-proposal.md` §2。
 - **依存方向検査**: `import-linter>=2`（**新規追加**）。層間・モジュール間の import 契約の機械検査。
   dev 依存。`lint-imports` を CI で実行。
 - **Lint**: `ruff>=0.6`。既存設定（line-length 100）。
@@ -136,7 +137,9 @@ graph TB
 ```text
 src/
 └── correction_layer/
-    ├── __init__.py              # 公開 API（CorrectionEngine・PrototypeStore・load_domain_set・コア型・JSON Schema 出力）
+    ├── __init__.py              # 公開 API（CorrectionEngine・SimilaritySource・コア型・JSON Schema 出力に加え、
+    │                            #   合成データ構築用の PrototypeStore・load_domain_set。後者の公開は Phase 0–3 が
+    │                            #   合成データで自己完結する意図的な選択。根拠は research.md）
     ├── model/                   # モデル層（最内側。パッケージ内の誰にも依存しない）
     │   ├── __init__.py
     │   ├── types.py             # コア型: ラベル enum・DomainAxes・PatchInput・PrimaryJudgment・FinalJudgment
@@ -150,11 +153,12 @@ src/
     │   │                        #   構造検証と SchemaViolation 収集
     │   ├── prototype_store.py   # 合成プロトタイプ集合＋FAISS IndexFlatIP: kNN 検索と指定 id 群への類似度計算
     │   └── domain_loader.py     # ドメイン定義 JSON のロード・検証委譲・複数ドメイン合成（DomainSet）・
+    │                            #   軸パターン索引の構築と candidates 引き当て・
     │                            #   element_id 全体一意性の検証・DomainValidationError
     ├── decision/                # 判定ロジック層（model のみに依存。モジュール間は互いに import しない）
     │   ├── __init__.py
     │   ├── primary.py           # 合成一次判定: 異常スコア（1 − 最大類似度）と固定閾値の比較
-    │   ├── matching.py          # 適用可否評価: ドメイン軸（any 含む）・prototype_ids 類似度
+    │   ├── matching.py          # 適用可否評価: 索引候補に対する prototype_ids 類似度条件
     │   ├── correction.py        # action×method の解釈: 二次判定（ラベル上書き・スコア再重み付け・閾値適応）
     │   └── resolution.py        # 優先順位チェーン: specificity → ReviewRequired 短絡 → safety → recency → element_id
     └── engine.py                # composition root（CorrectionEngine）: 一次判定 → 選別 → 競合解決 → 補正 → 最終判定の合成
@@ -168,10 +172,12 @@ tests/
 ├── test_records.py                 # 全フィールド解釈・action×method 制約・params 形（Phase 2）
 ├── test_schema_validation.py       # 不正 JSON の拒否と違反理由の報告（Phase 2）
 ├── test_domain_loader.py           # ロード・複数ドメイン合成・element_id 重複拒否（Phase 1→3）
-├── test_matching.py                # 類似度閾値・any 軸・複数条件 AND（Phase 1→3）
+├── test_domain_index.py            # 索引の候補抽出: any 軸・未知ドメイン・specificity 降順、
+│                                   #   hypothesis による全走査との等価性（Phase 3）
+├── test_matching.py                # 類似度閾値・複数条件 AND・類似度条件なし（Phase 1→3）
 ├── test_correction.py              # 4 action × 3 method の一次→二次変換（Phase 1→2）
 ├── test_resolution.py              # チェーン各段のテーブル駆動テスト・KeepPrimary 遮蔽 vs 削除フォールバック（Phase 3）
-├── test_resolution_properties.py   # hypothesis: 勝者一意性・推移律・決定性（Phase 3）
+├── test_resolution_properties.py   # hypothesis: 解決結果の一意性・入力順非依存・決定性（Phase 3）
 └── test_engine_e2e.py              # 最小 E2E（Positive→許容の反転）と複合シナリオ（Phase 1→3）
 ```
 
@@ -241,28 +247,31 @@ layers = [
     `decision/correction.py`（全 action×method）
   - 完了確認: 4 action の一次→二次変換、不正 JSON の reject
 - **Phase 3**
-  - 新規・拡張対象: `boundary/domain_loader.py`（複数ドメイン合成）、
-    `decision/matching.py`（`any` 軸）、`decision/resolution.py`
-  - 完了確認: チェーン全段のテーブル駆動テスト＋hypothesis の総順序性質
+  - 新規・拡張対象: `boundary/domain_loader.py`（複数ドメイン合成・軸パターン索引の構築と
+    `candidates` 引き当て）、`decision/matching.py`（索引候補の受領）、`decision/resolution.py`
+  - 完了確認: チェーン全段のテーブル駆動テスト＋hypothesis の決定性性質、
+    索引の候補抽出が全走査と同一集合を返すこと
 
 ## システムフロー
 
 ```mermaid
 flowchart TD
     P[PatchInput 受領] --> PJ[primary が異常スコアと固定閾値で一次判定]
-    P --> M[matching が有効レコード集合から適用候補を選別]
-    DS[DomainSet 有効レコード] --> M
+    P --> IX[DomainSet.candidates がドメイン索引で候補を絞り込み]
+    DS[DomainSet 軸パターン索引] --> IX
+    IX --> M[matching が候補から類似度条件で適用対象を選別]
     ST[PrototypeStore 類似度] --> PJ
     ST --> M
-    M -->|候補なし| F0[一次判定をそのまま最終判定へ写像]
-    M -->|候補あり| R[resolution が優先順位チェーンで解決]
+    M -->|適用対象なし| F0[一次判定をそのまま最終判定へ写像]
+    M -->|適用対象あり| R[resolution が優先順位チェーンで解決]
     R -->|ReviewRequired 短絡または勝者が保留| F1[要確認]
     R -->|勝者レコード| C[correction が action と method で二次判定]
     C --> F2[Positive は NG へ Negative は許容へ写像]
 ```
 
 - 適用候補の選別条件は一次判定の結果に依存しない（類似度・ドメイン軸のみ）。一次判定と選別は独立に計算し、engine が合成する。
-- 類似度は engine が注入された `SimilaritySource`（Phase 0–3 の実体は `PrototypeStore`）の `nearest`（一次判定用の最大類似度）と `similarities`（選別用の `match.prototype_ids` 類似度。類似度条件を持つレコードの分のみ）で解決し、解決済みの値を一次判定と選別へ渡す（境界での解決）。
+- ドメイン軸の絞り込みは `DomainSet` の索引が担い（`candidates`）、`matching` は索引が返した候補に対して類似度条件のみを評価する。有効レコード全件の走査は行わない（設計メモ §10）。
+- 類似度は engine が注入された `SimilaritySource`（Phase 0–3 の実体は `PrototypeStore`）の `nearest`（一次判定用の最大類似度）と `similarities`（選別用の `match.prototype_ids` 類似度。候補のうち類似度条件を持つレコードの分のみ）で解決し、解決済みの値を一次判定と選別へ渡す（境界での解決）。
 - 優先順位チェーンの詳細はコンポーネント `resolution` を参照。
 
 ## 要件トレーサビリティ
@@ -331,8 +340,8 @@ flowchart TD
   - コンポーネント: records
   - インターフェース／フロー: `CorrectionRecord` の model バリデータ
 - **5.4** 複数の適用条件はすべて充足（AND）
-  - コンポーネント: matching
-  - インターフェース／フロー: `applicable_records`（ドメイン軸＋指定時の類似度条件の全条件）
+  - コンポーネント: domain_loader, matching
+  - インターフェース／フロー: `DomainSet.candidates`（ドメイン軸）＋ `applicable_records`（指定時の類似度条件）
 - **5.5** 類似度条件の対の片方だけの指定を拒否
   - コンポーネント: records
   - インターフェース／フロー: `MatchCriteria` の model バリデータ
@@ -341,22 +350,22 @@ flowchart TD
   - インターフェース／フロー: `CorrectionRecord` の model バリデータ
 - **6.1** 複数ドメインの有効レコードを合成
   - コンポーネント: domain_loader
-  - インターフェース／フロー: `load_domain_set` → `DomainSet`
+  - インターフェース／フロー: `load_domain_set` → `DomainSet`（軸パターン索引を同時構築）
 - **6.2** `any` を広域ルールとして解釈
-  - コンポーネント: matching
-  - インターフェース／フロー: ドメイン軸照合（`any` は任意値に一致）
+  - コンポーネント: domain_loader
+  - インターフェース／フロー: `DomainSet.candidates`（入力軸から 16 パターンキーを生成して引き当て）
 - **6.3** 具体ドメインを広域より優先
   - コンポーネント: resolution
   - インターフェース／フロー: specificity（辞書式: 非 `any` 軸数 → 類似度条件の有無）
 - **6.4** 削除済みレコードは有効集合外・広域へフォールバック
   - コンポーネント: domain_loader
   - インターフェース／フロー: 有効集合＝ファイル記載要素のみ（削除は不在で表現）
-- **7.1** 総順序チェーンで勝者を一意決定
+- **7.1** 優先順位チェーンで解決結果を一意決定
   - コンポーネント: resolution
   - インターフェース／フロー: `resolve`（5 段チェーン）
-- **7.2** specificity 同点集合の ReviewRequired 短絡
+- **7.2** specificity 同点集合の ReviewRequired 短絡と代表 element_id
   - コンポーネント: resolution
-  - インターフェース／フロー: `resolve`（rule 2）
+  - インターフェース／フロー: `resolve`（rule 2）→ `ReviewEscalation.element_id`（集合内最大）
 - **7.3** safety: OverridePositive > KeepPrimary > OverrideNegative
   - コンポーネント: resolution
   - インターフェース／フロー: `resolve`（rule 3）
@@ -371,7 +380,7 @@ flowchart TD
   - インターフェース／フロー: specificity の帰結（rule 1）＋テーブル駆動テスト
 - **7.7** 同一入力・同一集合で常に同一判定
   - コンポーネント: resolution
-  - インターフェース／フロー: 総順序の性質を hypothesis で検証
+  - インターフェース／フロー: 解決結果の一意性・入力順非依存を hypothesis で検証
 - **8.1** 最終判定は NG／許容／要確認のいずれか
   - コンポーネント: engine, types
   - インターフェース／フロー: `FinalJudgment.label: FinalLabel`
@@ -401,16 +410,16 @@ flowchart TD
   - Req Coverage: 1.1, 1.2, 2.5
   - Key Dependencies: faiss (P0), numpy (P0)
   - Contracts: Service
-- **domain_loader**（入力境界（boundary/））: ドメイン定義のロード・合成・一意性検証
-  - Req Coverage: 1.1, 5.2, 6.1, 6.4
+- **domain_loader**（入力境界（boundary/））: ドメイン定義のロード・合成・一意性検証・軸パターン索引
+  - Req Coverage: 1.1, 5.2, 6.1, 6.2, 6.4
   - Key Dependencies: schema (P0), records (P0)
   - Contracts: Service
 - **primary**（判定ロジック（decision/））: 合成一次判定（解決済み類似度を受領）
   - Req Coverage: 1.3
   - Key Dependencies: types (P0)
   - Contracts: Service
-- **matching**（判定ロジック（decision/））: 適用レコード選別（解決済み類似度を受領）
-  - Req Coverage: 2.1–2.3, 2.6, 5.4, 6.2
+- **matching**（判定ロジック（decision/））: 索引候補からの適用対象選別（解決済み類似度を受領）
+  - Req Coverage: 2.1–2.3, 2.6, 5.4
   - Key Dependencies: records (P0), types (P0)
   - Contracts: Service
 - **resolution**（判定ロジック（decision/））: 優先順位チェーンによる競合解決
@@ -578,19 +587,33 @@ class PrototypeStore:  # model/ports.py の SimilaritySource を構造的に充�
 - 指定パス群の JSON を読み、`schema.validate_domain_document` → `DomainDefinition` パースの順で検証する。いずれかのファイルに違反があれば `DomainValidationError`（ファイル別の違反一覧を保持）で fail-fast する（部分縮退はしない。理由は research.md の Design Decisions 参照）。
 - 全ドメインの要素を「レコード＋由来ドメイン軸」（`records.EffectiveRecord`）に展開して `DomainSet` へ合成する（要件 6.1）。ファイルに存在しない要素は有効集合に含まれない（削除＝不在。要件 6.4）。
 - `element_id` の**全ドメイン横断の一意性**を検証し、重複は `DomainValidationError` とする（チェーン最終段のタイブレークの前提。設計メモ §6.3）。
+- **ロード時に不変のドメイン索引を構築する**（段階計画 Phase 3 の「合成インメモリ索引」、設計メモ §10 の線形スキャン禁止）。索引のキーは**由来ドメイン定義の軸パターンそのもの**（各軸が具体値または `any`）で、値は当該パターンのレコード列。判定時は入力パッチの具体 4 軸から、各軸を `any` に落とした組合せ 2^4 = 16 個のキーを生成して引き当て、候補だけを `matching` へ渡す。有効レコード総数によらず参照は定数回で、全レコード走査は行わない。
+  - パターン側をキーにすることで、**ドメイン定義に現れない未知ドメインの入力でも広域（`any`）レコードが正しく引ける**（入力側キーを索引化すると未知ドメインで広域ルールを取りこぼす）。
+  - 引き当ては specificity 降順（非 `any` 軸数の多いキーから）で行い、`resolution` へ渡す候補列の順序を入力ファイルの並びに依存させない。
+  - Phase 0–3 のドメイン軸は不透明文字列の完全一致のみ（上位クラス階層は Phase 7）なので、キー生成は 16 通りの列挙で閉じる。Phase 7 で階層マッチを入れる際は、この生成規則を上位クラス集合へ拡張する（Revalidation Trigger）。
 
 ##### Service Interface (domain_loader)
 
 ```python
+DomainPattern = tuple[str, str, str, str]   # 由来ドメインの軸パターン（各要素は具体値または "any"）
+
 @dataclass(frozen=True)
 class DomainSet:
-    records: tuple[EffectiveRecord, ...]   # records.EffectiveRecord
+    records: tuple[EffectiveRecord, ...]                        # 全有効レコード（監査・テスト用の全体ビュー）
+    index: Mapping[DomainPattern, tuple[EffectiveRecord, ...]]  # 軸パターン → 当該パターンのレコード
+
+    def candidates(self, domain: DomainAxes) -> tuple[EffectiveRecord, ...]:
+        """入力の具体 4 軸から 16 個のパターンキーを生成して索引を引き、
+        ドメイン軸に適合する候補のみを specificity 降順で返す（線形走査しない）。"""
 
 class DomainValidationError(Exception):
     violations: Mapping[str, list[SchemaViolation]]   # ファイルパス → 違反一覧
 
 def load_domain_set(paths: Sequence[Path]) -> DomainSet: ...
 ```
+
+- Invariants: `index` の全エントリの和は `records` に一致する（各レコードはちょうど 1 つのパターンキーに属する）。構築後は不変。
+- Postconditions: `candidates` の戻り値は、同じ `DomainSet` と同じ入力軸に対して常に同一の並び。
 
 ### 判定ロジック層（decision/）
 
@@ -625,27 +648,29 @@ def judge_primary(
 ##### Responsibilities & Constraints (matching)
 
 - 適用条件は指定された条件すべての充足（AND。要件 5.4）:
-  1. **ドメイン軸**: レコード由来の 4 軸それぞれが、入力の軸と等しいか `any`（要件 6.2）。
+  1. **ドメイン軸**: レコード由来の 4 軸それぞれが、入力の軸と等しいか `any`（要件 6.2）。**索引引き当て（`DomainSet.candidates`）でこの条件は充足済み**であり、本モジュールは索引が保証する不変条件として前提にする（二重判定はしない）。
   2. **類似度条件（指定時のみ）**: `match.prototype_ids` のいずれかとの cosine 類似度が `similarity_threshold` 以上（ANY 意味論。根拠は research.md）。未達なら除外（要件 2.3）。
-- 類似度条件を持たないレコードはドメイン軸のみで適用可否を判定する（要件 2.6。ドメイン単位の閾値調整等の広域補正）。
+- 類似度条件を持たないレコードはドメイン軸のみで適用可否が決まるため、そのまま適用対象になる（要件 2.6。ドメイン単位の閾値調整等の広域補正）。
+- 入力は索引で絞り込まれた候補列（`DomainSet.candidates` の戻り値）であり、全有効レコードを受け取らない（設計メモ §10 の線形スキャン禁止）。
 - 類似度は引数で受け取る（`prototype_store` への問い合わせは engine が行い、解決済みの値を渡す）。
 
 ##### Service Interface (matching)
 
 ```python
 def applicable_records(
-    patch: PatchInput,
-    records: Sequence[EffectiveRecord],
-    similarities: Mapping[int, float],   # prototype_id → 入力 ROI 埋め込みとの cosine 類似度
+    candidates: Sequence[EffectiveRecord],   # DomainSet.candidates の戻り値（ドメイン軸適合済み）
+    similarities: Mapping[int, float],       # prototype_id → 入力 ROI 埋め込みとの cosine 類似度
 ) -> list[EffectiveRecord]: ...
 ```
 
+- Preconditions: `candidates` の全レコードは入力パッチのドメイン軸に適合済み（索引の不変条件）。
+
 #### resolution
 
-| Field        | Detail                                       |
-| ------------ | -------------------------------------------- |
-| Intent       | 競合する適用レコードの決定的な解決（総順序） |
-| Requirements | 3.4, 6.3, 7.1, 7.2, 7.3, 7.4, 7.5, 7.6, 7.7  |
+| Field        | Detail                                            |
+| ------------ | ------------------------------------------------- |
+| Intent       | 競合する適用レコードの決定的な解決（結果の一意性）|
+| Requirements | 3.4, 6.3, 7.1, 7.2, 7.3, 7.4, 7.5, 7.6, 7.7       |
 
 ##### Responsibilities & Constraints (resolution)
 
@@ -655,7 +680,10 @@ def applicable_records(
   3. **safety**: `OverridePositive` > `KeepPrimary` > `OverrideNegative`（要件 7.3）。
   4. **recency**: `recorded_at` が新しい方（要件 7.4）。
   5. **element_id**: 数値の大きい方（要件 7.5。全ドメイン一意なのでここで必ず決着＝全域性）。
-- 純粋関数として実装し、同一入力・同一集合で常に同一結果（要件 7.7）。総順序性質（一意性・推移律・決定性）は hypothesis で検証する。
+- **保証するのは「解決結果の一意性」**であり、レコード集合上の総順序ではない（設計検証 DESIGN-ARCH-005 対応）。rule 2 の `ReviewRequired` 短絡は分類軸（safety）とは別軸の打ち切りであり（設計メモ §9.1）、短絡した集合内のレコード間には順序を定義しない。短絡の結果は常に一意（要確認）なので、要件 7.7 の決定性は保たれる。
+  - 短絡時も**説明可能性のために代表レコードを一意に決める**: 短絡集合のうち `element_id` が最大のものを `ReviewEscalation.element_id` に載せる（`FinalJudgment.applied_element_id` に伝播）。この選択自体も決定的である。
+  - rule 3–5（safety → recency → element_id）は `ReviewRequired` を含まない集合上の総順序であり、この範囲では従来どおり総順序として検証する。
+- 純粋関数として実装し、同一入力・同一集合で常に同一結果（要件 7.7）。決定性の性質（結果の一意性・入力順非依存・全域性、および rule 3–5 の総順序性）は hypothesis で検証する。
 
 ##### Service Interface (resolution)
 
@@ -663,12 +691,15 @@ def applicable_records(
 @dataclass(frozen=True)
 class ReviewEscalation:
     """ReviewRequired 短絡または保留勝者。最終判定は要確認。"""
+    element_id: int   # 短絡集合の代表（element_id 最大。説明可能性のため）
 
 def resolve(candidates: Sequence[EffectiveRecord]) -> EffectiveRecord | ReviewEscalation:
     """candidates は非空。戻り値が EffectiveRecord のとき action は
     OverrideNegative / OverridePositive / KeepPrimary のいずれか
     （ReviewRequired は rule 2 で必ず ReviewEscalation になる）。"""
 ```
+
+- Postconditions: 同一の候補集合（順序違いを含む）に対して戻り値は常に等価。`ReviewEscalation` の `element_id` も一意に定まる。
 
 #### correction
 
@@ -708,7 +739,7 @@ def apply_correction(
 ##### Responsibilities & Constraints (engine)
 
 - 構築時に解決済みの `SimilaritySource`（`model/ports.py` の Protocol。Phase 0–3 では合成 `PrototypeStore` を注入）・`DomainSet`・一次判定閾値を受け取る（要件 1.1 の「実行可能な状態」）。
-- `judge` は: (1) ストアの `nearest`（一次判定用の最大類似度）と `similarities`（選別用の `match.prototype_ids` 類似度。類似度条件を持つレコードの分のみ）で類似度を解決（照会埋め込みの L2 正規化はストア内部で行う）、(2) 一次判定、(3) 適用候補の選別、(4) 候補なしなら一次判定を最終判定へ写像（要件 2.4）、(5) 候補ありなら resolution → correction、(6) `FinalLabel` へ写像（Positive→NG、Negative→許容、保留→要確認。要件 8.1）。
+- `judge` は: (1) `DomainSet.candidates` で入力ドメインの候補を索引から引く、(2) ストアの `nearest`（一次判定用の最大類似度）と `similarities`（選別用。候補のうち類似度条件を持つレコードが参照する `prototype_ids` の分のみ）で類似度を解決（照会埋め込みの L2 正規化はストア内部で行う）、(3) 一次判定、(4) 候補からの適用対象の選別、(5) 適用対象なしなら一次判定を最終判定へ写像（要件 2.4）、(6) ありなら resolution → correction、(7) `FinalLabel` へ写像（Positive→NG、Negative→許容、保留→要確認。要件 8.1）。
 - 純粋な推論処理であり、内部状態の更新・学習・永続化を一切行わない（要件 8.2、1.4）。
 
 ##### Service Interface (engine)
@@ -721,14 +752,14 @@ class CorrectionEngine:
     def judge(self, patch: PatchInput) -> FinalJudgment: ...
 ```
 
-- Postconditions: `FinalJudgment.label` は NG／許容／要確認のいずれか。`applied_element_id` は補正が適用された場合のみ勝者の `element_id`（説明可能性のため。候補なしは `None`）。
+- Postconditions: `FinalJudgment.label` は NG／許容／要確認のいずれか。`applied_element_id` は補正が適用された場合は勝者の `element_id`、`ReviewRequired` 短絡の場合は `ReviewEscalation.element_id`（代表）、適用対象なしの場合は `None`（説明可能性のため）。
 
 ## データモデル
 
 ### ドメインモデル
 
 - **CorrectionRecord**（値オブジェクト）: HITL 由来の補正指示 1 件。`element_id` が同一性のキー。不変。
-- **DomainSet**（集約）: ロード済み全ドメインの有効レコード集合。判定時の唯一の参照点。ロード後は不変。
+- **DomainSet**（集約）: ロード済み全ドメインの有効レコード集合と軸パターン索引。判定時の唯一の参照点。ロード後は不変。
 - **PrototypeStore**（集約）: 合成プロトタイプ集合。類似度尺度の権威。構築後は不変。
 - **判定はすべて純粋関数**: 一次判定 → 選別 → 解決 → 補正の各段は入力から出力を導出するのみで、状態を変更しない（要件 8.2 の不変制約）。
 
@@ -846,17 +877,18 @@ Phase 0–3 はテスト駆動の検証段階のためログ基盤は導入し�
 - `schema`: フィールド欠落・型不一致・enum 定義外それぞれの違反レポート内容（5.2）、複数違反の全件報告
 - `prototype_store`: 既知ベクトルでの kNN の id・類似度の厳密値（1.2）、`similarities` の一致性（2.5: `nearest` と同値になること）、未正規化の照会ベクトルが正規化済み入力と同一結果になること（照会時 L2 正規化のストア一元化の契約）
 - `primary`: `anomaly_score > threshold` の境界値（等号側は Negative）（1.3）
-- `matching`: 閾値ちょうど（≥ で充足）・未達除外（2.2、2.3）、複数条件 AND（5.4）、`any` 軸の広域適用（6.2）、類似度条件なしレコードのドメイン軸のみ適用（2.6）
+- `matching`: 閾値ちょうど（≥ で充足）・未達除外（2.2、2.3）、複数条件 AND（5.4）、類似度条件なしレコードがそのまま適用対象になること（2.6）
 - `correction`: 4 action × 適用可能 method の全経路の一次→二次変換（3.1–3.3、4.1–4.3）
 
 ### Integration Tests
 
 - `domain_loader`: 複数ドメイン JSON の合成（6.1）、`element_id` 重複の拒否、不正ファイル混在時の fail-fast（5.2）
+- `domain_loader` の索引（6.2、設計メモ §10）: `candidates` が返す集合が全レコード走査でドメイン軸照合した結果と一致すること（索引と素朴実装の等価性。hypothesis でランダムなドメイン定義と入力軸に対して検証）、`any` 軸レコードが**ドメイン定義に存在しない未知ドメインの入力**でも引けること、戻り値が specificity 降順かつ入力ファイル順に非依存であること
 - `engine` E2E（Phase 1 の確認そのもの）: 一次 Positive のパッチが登録済みプロトタイプ近傍で「許容」に反転する（2.2＋3.1＋8.1）
 - `engine` E2E: 適用候補なしで一次判定がそのまま最終判定になる（2.4）、ReviewRequired 適用で「要確認」（3.4）
 - 削除フォールバック vs KeepPrimary 遮蔽: 同じ広域 `OverrideNegative` の下で、(a) 具体レコードをファイルから消すと広域が効く（6.4）、(b) 具体 `KeepPrimary` を置くと広域が遮蔽され一次判定が通る（7.6）——挙動差を対で固定する
 
 ### Property-Based Tests（hypothesis）
 
-- `resolution` の総順序性質（7.7）: ランダム生成レコード集合に対し (a) 勝者の一意性、(b) 2 レコード比較の反対称性・推移律、(c) 同一入力の決定性（複数回実行で不変）、(d) 同時刻 `recorded_at`・同 specificity でも必ず決着（全域性）
+- `resolution` の決定性性質（7.7）: ランダム生成レコード集合に対し (a) 解決結果の一意性（勝者レコードまたは保留のいずれかに必ず定まる）、(b) 入力順を並べ替えても結果が不変、(c) 同一入力の決定性（複数回実行で不変）、(d) 同時刻 `recorded_at`・同 specificity でも必ず決着（全域性）、(e) `ReviewRequired` を含まない集合では 2 レコード比較が反対称性・推移律を満たす（rule 3–5 の総順序性）、(f) `ReviewRequired` を含む集合では代表 `element_id` が集合内最大に一意決定される
 - テーブル駆動テスト: チェーン各段（specificity 差（ドメイン軸数・類似度条件の有無の両キー）・ReviewRequired 短絡・safety 順・recency・element_id）で決着する競合ケースを段ごとに網羅（7.1–7.5、6.3）——設計上最も壊れやすい部分として厚めに固定する

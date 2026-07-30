@@ -102,8 +102,8 @@
 
 #### Acceptance Criteria (Requirement 7)
 
-1. When 異なる element_id の複数レコードが同一入力にマッチした, the 補正レイヤ shall specificity、ReviewRequired 短絡、safety、recency、element_id の順で構成される総順序により勝者を一意に決定する。
-2. If specificity 同点の勝ち集合に ReviewRequired のレコードが含まれる, then the 補正レイヤ shall 以降の比較を打ち切り、最終判定を保留（要確認）にする。
+1. When 異なる element_id の複数レコードが同一入力にマッチした, the 補正レイヤ shall specificity、ReviewRequired 短絡、safety、recency、element_id の順で構成される優先順位チェーンにより解決結果（勝者レコードまたは保留）を一意に決定する。
+2. If specificity 同点の勝ち集合に ReviewRequired のレコードが含まれる, then the 補正レイヤ shall 以降の比較を打ち切り、最終判定を保留（要確認）にするとともに、当該集合のうち element_id が最大のレコードを説明可能性のための代表として出力する。
 3. If ReviewRequired で決着しない同一 specificity の競合が生じた, then the 補正レイヤ shall OverridePositive、KeepPrimary、OverrideNegative の順の安全側優先で勝者を決定する。
 4. If safety でも競合が決着しない, then the 補正レイヤ shall recorded_at がより新しいレコードを優先する。
 5. If recency でも競合が決着しない, then the 補正レイヤ shall element_id がより大きいレコードを優先する。

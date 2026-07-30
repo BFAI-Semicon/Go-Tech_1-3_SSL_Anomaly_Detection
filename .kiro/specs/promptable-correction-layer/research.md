@@ -227,9 +227,35 @@
   2. 消費側（engine 内）で Protocol を定義 — Python の構造的部分型の慣行には沿うが、戻り値型 `NeighborHit` が boundary に残り、port の語彙が 2 層に分裂する。
   3. `model/ports.py` に `SimilaritySource` Protocol と `NeighborHit` を定義 — engine は port にのみ依存し、`boundary/prototype_store` は Protocol を構造的に充足する（明示継承なし）。依存方向（model ← boundary／engine）が保たれ、port の語彙が最内側に揃う。
 - **Selected Approach**: 3 を採用。import-linter の model 内契約を「`records` → `types`／`ports`」に拡張。
-- **Rationale**: 設計が宣言する Phase 8 seam（ストア差し替えで engine・公開 API 不変）を型レベルで成立させる。指摘のうち「合成ストア・loader の公開」は意図的（Phase 0–3 は合成データで自己完結し、テスト・fixture がストアを構築する）であり、「JSON Schema の `dict[str, Any]`」は pydantic `model_json_schema()` の標準戻り型のため、いずれも変更しない。
+- **Rationale**: 設計が宣言する Phase 8 seam（ストア差し替えで engine・公開 API 不変）を型レベルで成立させる。
+- **不採用とした指摘（2026-07-30 の再検証でも継続指摘されたが方針を維持）**:
+  - **合成 `PrototypeStore`・`load_domain_set` のルート公開**: Phase 0–3 は「合成データのみで一連の判定処理を完了する」ことが要件 1.4 であり、パッケージ利用者（テスト・フィクスチャ・E2E）がストアとドメイン定義を構築できる必要がある。engine が port に依存する以上、公開されていても Phase 8 の差し替えは阻害されない。testing 用サブ API へ隔離するのは、実物実装が入る Phase 8 で `boundary/` の構成を見直す際に判断する。
+  - **`domain_definition_json_schema() -> dict[str, Any]`**: pydantic `model_json_schema()` の標準戻り型であり、再帰的な JSON 型を自作しても得られるのは戻り値の静的表現だけで、スキーマの内容的な正しさは担保されない（正しさは pydantic モデルが権威）。コストに見合わない。
 - **Trade-offs**: model 層が numpy 型（`ndarray`）に依存するが、`PatchInput.roi_embedding` が既に保持しており新規の依存ではない。
 - **Follow-up**: Phase 8 で patch-feature-store のアダプタが同 Protocol を満たすことを統合テストで確認する。
+
+### Decision: ドメイン軸の絞り込みは軸パターン索引（入力側キーではなくレコード側パターンをキーにする）
+
+- **Context**: 設計検証（2026-07-30、DESIGN-ARCH-004）で、`DomainSet` がフラットなレコード列で `applicable_records` が全走査になっており、段階計画 Phase 3 の「合成インメモリ索引」および設計メモ §10 の「線形スキャン禁止」を満たさないと指摘された。
+- **Alternatives Considered**:
+  1. 全走査のまま（合成データ数百件なら性能問題は起きない）— 段階計画の Phase 3 完了条件を満たさず、Phase 4 以降で全ドメインをロードする際に作り直しになる。
+  2. **入力ドメインキー**（具体 4 軸）を索引キーにし、各レコードを自身がカバーする全キーへ登録 — ドメイン定義に現れない**未知ドメインの入力で広域（`any`）レコードを取りこぼす**。一次判定がドメイン非依存で未知ドメインにも判定を出す設計（設計メモ §3）と矛盾する。
+  3. **レコード側の軸パターン**（各軸が具体値または `any`）を索引キーにし、判定時に入力の具体 4 軸から各軸を `any` に落とした 2^4 = 16 パターンを生成して引く — 参照は有効レコード総数によらず定数回。未知ドメインでも `("any","any","any","any")` 等が正しく引ける。
+- **Selected Approach**: 3 を採用。`DomainSet` は `records`（全体ビュー）と `index`（パターン → レコード列）を持ち、`candidates(domain)` が specificity 降順で候補を返す。`matching` はドメイン軸照合を持たず（索引の不変条件として前提）、類似度条件のみを評価する。
+- **Rationale**: Phase 0–3 のドメイン軸は不透明文字列の完全一致のみなので、パターン生成は 16 通りの列挙で閉じる。責務も自然に分かれる（ドメイン軸＝ロード時に決まる静的構造→境界層、類似度＝入力ごとに変わる動的条件→判定層）。
+- **Trade-offs**: ドメイン軸照合の正しさが索引実装に集約されるため、索引と素朴な全走査の等価性を hypothesis で検証する必要がある（テスト戦略に追加済み）。
+- **Follow-up**: Phase 7 で上位クラス階層マッチを導入する際、パターン生成規則を上位クラス集合へ拡張する（design.md の Revalidation Trigger）。
+
+### Decision: resolution が保証するのは「解決結果の一意性」であり総順序ではない
+
+- **Context**: 設計検証（2026-07-30、DESIGN-ARCH-005）で、`ReviewRequired` 短絡が比較を打ち切るため複数 `ReviewRequired` 間の勝者一意性・反対称性が保証できず、「総順序」という設計上の主張と両立しないと指摘された。
+- **Alternatives Considered**:
+  1. `ReviewRequired` も safety スカラに組み込んで完全な総順序にする — 設計メモ §9.1 が明示的に否定している（`ReviewRequired` は分類ではなく自動判定の一時停止であり、見逃し⇄過検出の 1 軸に混ぜると人間確認の意図が自動補正に握り潰される）。
+  2. 用語を実態に合わせ、保証対象を「解決結果（勝者レコードまたは保留）の一意性」とする — 要件 7.7 が求めるのは最終判定の決定性であり、`ReviewRequired` が何件並んでも結果は必ず「要確認」に収束する。
+- **Selected Approach**: 2 を採用。`resolution` の Intent・hypothesis の性質記述を「決定性・入力順非依存・全域性」に改め、総順序性は `ReviewRequired` を含まない集合（rule 3–5）の性質として検証する。あわせて説明可能性のため `ReviewEscalation` に代表 `element_id`（短絡集合内の最大値）を持たせ、`FinalJudgment.applied_element_id` に伝播させる（要件 7.2 を改訂）。
+- **Rationale**: 指摘の形式的な正しさ（レコード間に順序が定義されない）は認めつつ、実害は「どのレコードが保留を引き起こしたか出力されない」という説明可能性の欠落だけなので、そこだけを埋める。判定意味論は設計メモの意図どおり維持する。
+- **Trade-offs**: 「総順序」という強い主張を手放すが、検証すべき性質はむしろ明確になる。
+- **Follow-up**: なし。
 
 ### Decision: Phase 0–3 のドメイン定義 JSON はバージョン管理メタを持たない簡易スキーマ
 
@@ -241,7 +267,8 @@
 
 ## Risks & Mitigations
 
-- specificity の暫定定義が Phase 7（上位クラス階層）で変わる — 定義を `decision/resolution.py` の単一関数に局所化し、hypothesis の総順序性質テストを差し替え時の回帰ゲートにする。
+- specificity の暫定定義が Phase 7（上位クラス階層）で変わる — 定義を `decision/resolution.py` の単一関数に局所化し、hypothesis の決定性性質テストを差し替え時の回帰ゲートにする。
+- ドメイン軸照合が索引実装（`boundary/domain_loader.py`）に集約されたことで、索引のバグがそのまま誤適用になる — 索引と素朴な全走査の等価性を hypothesis の性質テストで固定し、未知ドメイン入力に対する `any` レコードの引き当ても明示的に検証する。
 - 浮動小数点比較の境界（`anomaly_score > threshold`・`similarity >= similarity_threshold`）の不一致 — 比較の向き・等号の有無をデータモデル定義に明文化し、境界値テストを必須にする。
 - `recorded_at` 同時刻の衝突 — チェーン最終段の `element_id` タイブレークで総順序が保証される（§9.1 rule5）。hypothesis で同時刻ケースを生成して検証する。
 - 合成一次判定（kNN＋固定閾値）が実物（primary-anomaly-detection）と乖離する — 一次判定を `decision/primary.py` に隔離し、Phase 8 で差し替える seam を design.md の境界コミットメントに明記。
