@@ -49,6 +49,7 @@
 
 - 補正レコードのフィールド名・型・enum 値の変更（llm-feedback-structuring と共有する語彙。JSON Schema 成果物の再配布が必要）
 - 類似度尺度（cosine／L2 正規化／閾値の大小方向）の変更（patch-feature-store の実メトリックとの突合。Phase 8）
+- プロトタイプ種別 `kind` の導入（設計メモ §2.1）により、実運用では一次判定（正常集合＝`normal`／`acceptable`）と補正照合（全種別）で参照集合が異なる。本スコープの合成 `PrototypeStore` は単一集合のため、Phase 8 統合時に参照集合の分離と突合する
 - specificity 定義の変更（Phase 7 の上位クラス階層導入時）
 - 最終判定ラベル集合（NG／許容／要確認）の変更（evaluation-framework・運用への波及）
 - ドメイン軸（process／material／equipment／unit_of_work の 4 軸）の変更

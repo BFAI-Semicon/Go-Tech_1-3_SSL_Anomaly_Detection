@@ -53,6 +53,11 @@
 - 要素単位 `ontology_version` の要否再検討：`match.scope` の廃止（§6.3）により要素が CURIE 型フィールドを
   持たなくなったため、要素版タグの対象が存在しない。ドメイン側の `domain_source_ontology_version` で
   足りるかを確認する。
+- `match.prototype_ids` の生成規則の明文化：レコード登録時にどのプロトタイプ id を指すか。方向性は
+  「注釈された誤判定 ROI の埋め込みを新規プロトタイプとして登録（過検出由来は `kind=acceptable`、
+  見逃し由来は `kind=defect`。§2.1）し、その id を参照する」（最近傍の既存 id を借りる方式は、過検出側では
+  類似度が閾値に届かず、見逃し側では正常と分離できないため不採用）。登録→採番→レコード発行の順序と
+  `built_against_bank_snapshot_id` との関係を patch-feature-store／llm-feedback-structuring の spec で確定する。
 - §4.2／§9.1 の上位クラスマッチング方式：有効スナップショットの `ontology_version` に対応する
   `rdfs:subClassOf` 推移閉包をスナップショット生成時に焼き込むか、稼働系がピン留めされた TTL をロードして
   解決するか。多重継承時の specificity（階層距離）と推論範囲も併せて確定する。
