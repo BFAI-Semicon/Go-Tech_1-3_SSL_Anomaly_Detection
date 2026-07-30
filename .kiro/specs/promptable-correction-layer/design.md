@@ -149,8 +149,8 @@ src/
     │                            #   EffectiveRecord（レコード＋由来ドメイン軸）
     ├── boundary/                # 入力境界層（model のみに依存。decision に触れない）
     │   ├── __init__.py
-    │   ├── schema.py            # pydantic モデルからの JSON Schema 生成、jsonschema による raw 文書の
-    │   │                        #   構造検証と SchemaViolation 収集
+    │   ├── schema.py            # pydantic モデルからの JSON Schema 生成、jsonschema／pydantic 違反の
+    │   │                        #   DomainViolation（structural／semantic）への変換
     │   ├── prototype_store.py   # 合成プロトタイプ集合＋FAISS IndexFlatIP: kNN 検索と指定 id 群への類似度計算
     │   └── domain_loader.py     # ドメイン定義 JSON のロード・検証委譲・複数ドメイン合成（DomainSet）・
     │                            #   軸パターン索引の構築と candidates 引き当て・
@@ -402,16 +402,16 @@ flowchart TD
   - Req Coverage: 4.4, 5.1, 5.3, 5.5, 5.6
   - Key Dependencies: types (P0)
   - Contracts: State
-- **schema**（入力境界（boundary/））: JSON Schema 生成と raw 文書の構造検証
-  - Req Coverage: 5.2
+- **schema**（入力境界（boundary/））: JSON Schema 生成と統一違反型（DomainViolation）への変換
+  - Req Coverage: 5.2, 5.3, 5.5, 5.6
   - Key Dependencies: records (P0), jsonschema (P0)
   - Contracts: Service
 - **prototype_store**（入力境界（boundary/））: 合成プロトタイプの kNN と類似度計算
   - Req Coverage: 1.1, 1.2, 2.5
   - Key Dependencies: faiss (P0), numpy (P0)
   - Contracts: Service
-- **domain_loader**（入力境界（boundary/））: ドメイン定義のロード・合成・一意性検証・軸パターン索引
-  - Req Coverage: 1.1, 5.2, 6.1, 6.2, 6.4
+- **domain_loader**（入力境界（boundary/））: ドメイン定義のロード・合成・違反集約・軸パターン索引
+  - Req Coverage: 1.1, 5.2, 5.3, 5.5, 5.6, 6.1, 6.2, 6.4
   - Key Dependencies: schema (P0), records (P0)
   - Contracts: Service
 - **primary**（判定ロジック（decision/））: 合成一次判定（解決済み類似度を受領）
@@ -474,7 +474,7 @@ class SimilaritySource(Protocol):
 - 判定スキーマの 8 フィールド（設計メモ §6.3 のうち要素単位 `ontology_version`（Phase 7 責務）を除く。requirements 5.1 の列挙と同一）を型付きで表現する。スキーマ定義の単一の権威。
 - action×method の組合せ規約（`KeepPrimary`／`ReviewRequired` は method null かつ params 空、`OverrideNegative`／`OverridePositive` は method 非 null）を model バリデータで強制する。
 - method 別の params 形（`LabelOverride`→`{}`、`ScoreReweight`→`{"weight": float > 0}`、`ThresholdAdapt`→`{"threshold_delta": float}`）を検証する。未知フィールドは拒否（`extra="forbid"`）。
-- `match` の類似度条件（`prototype_ids`／`similarity_threshold`）は**対で任意**とする。両方あり＝プロトタイプ照合つき、両方なし（`"match": {}`）＝ドメイン軸のみで適用する広域レコード（要件 2.6）。片方だけの指定は model バリデータで拒否する（要件 5.5）。
+- `match` の類似度条件（`prototype_ids`／`similarity_threshold`）は**対で任意**とする。両方あり＝プロトタイプ照合つき、両方なし（`"match": {}`）＝ドメイン軸のみで適用する広域レコード（要件 2.6）。片方だけの指定は model バリデータで拒否する（要件 5.5）。指定時の `similarity_threshold` は有限値かつ [-1, 1]（cosine 値域。設計検証 DESIGN-ARCH-007）。
 - soft method の params と action の方向整合（`OverrideNegative` は `weight` < 1／`threshold_delta` > 0、`OverridePositive` は `weight` > 1／`threshold_delta` < 0）を model バリデータで強制する（要件 5.6）。
 - `recorded_at` はタイムゾーン付き（UTC）を必須とする。
 - 有効レコードの共有型 `EffectiveRecord`（レコード＋由来ドメイン軸）を定義する。生成は domain_loader、消費は matching／resolution が行い、両者はこのモジュールの型のみに依存する。
@@ -498,7 +498,9 @@ class MatchCriteria(BaseModel):
     # 類似度条件は対で任意（両方 None＝ドメイン軸のみで適用する広域レコード。要件 2.6。
     # 片方だけの指定は model バリデータで拒否。要件 5.5）
     prototype_ids: list[int] | None = None      # 指定時 min_length=1、int64 整数
-    similarity_threshold: float | None = None   # cosine 類似度（高いほど近い）。充足は「類似度 >= threshold」
+    similarity_threshold: float | None = None   # cosine 類似度（高いほど近い）。
+    # 指定時は有限値かつ [-1, 1]（PrototypeStore の値域と整合。DESIGN-ARCH-007）。
+    # 充足は「類似度 >= threshold」
 
 class CorrectionRecord(BaseModel):
     element_id: int
@@ -526,27 +528,44 @@ class EffectiveRecord:
 
 #### schema
 
-| Field        | Detail                                                           |
-| ------------ | ---------------------------------------------------------------- |
-| Intent       | pydantic モデルからの JSON Schema 生成と raw JSON 文書の構造検証 |
-| Requirements | 5.2                                                              |
+| Field        | Detail                                                        |
+| ------------ | ------------------------------------------------------------- |
+| Intent       | JSON Schema 生成と検証違反の統一型（DomainViolation）への変換 |
+| Requirements | 5.2, 5.3, 5.5, 5.6                                            |
 
 ##### Responsibilities & Constraints (schema)
 
 - `DomainDefinition.model_json_schema()` から JSON Schema を生成する。この Schema は llm-feedback-structuring と共有するデータ契約の成果物を兼ねる。
-- raw 文書（dict）に jsonschema を適用し、全違反（フィールド欠落・型不一致・enum 定義外）を `SchemaViolation`（JSON パス＋理由）として収集して返す。fail-fast だが最初の 1 件で止めず違反は全件報告する。
-- jsonschema 通過後の pydantic パースで action×method 等の組合せ制約を検証する（2 段構えの 1 段目＝構造、2 段目に相当する統制語彙検証は Phase 7 スコープ外）。
+- **統一違反型 `DomainViolation`**（設計検証 DESIGN-ARCH-006 対応）を定義し、検証経路の違いを `kind` で表す:
+  - `structural`: jsonschema の構造違反（フィールド欠落・型不一致・enum 定義外）
+  - `semantic`: pydantic model バリデータ違反（action×method・類似度条件の対・action×params 方向。要件 5.3／5.5／5.6）
+  - `cross_file`: ファイル横断の制約違反（`element_id` 重複。設計メモ §6.3）
+- raw 文書に jsonschema を適用し、違反を `kind=structural` の `DomainViolation` として全件収集する（最初の 1 件で止めない）。
+- jsonschema 通過後の pydantic パースで意味制約を検証する。`ValidationError` の各エラーを `kind=semantic` の `DomainViolation` へ変換する規則:
+  - `json_path` は pydantic の `loc` を JSON Pointer 風（`/elements/0/method`）に連結したもの
+  - `message` は pydantic のエラーメッセージをそのまま使う
+  - 統制語彙検証（CURIE 実在）は Phase 7 スコープ外
 
 ##### Service Interface (schema)
 
 ```python
+class ViolationKind(StrEnum):
+    STRUCTURAL = "structural"
+    SEMANTIC = "semantic"
+    CROSS_FILE = "cross_file"
+
 @dataclass(frozen=True)
-class SchemaViolation:
-    json_path: str
+class DomainViolation:
+    kind: ViolationKind
+    json_path: str                          # 主たる違反箇所（JSON Pointer 風）
     message: str
+    related_paths: tuple[str, ...] = ()     # cross_file 時の関連箇所（他ファイルのパス等）
 
 def domain_definition_json_schema() -> dict[str, Any]: ...
-def validate_domain_document(raw: object) -> list[SchemaViolation]: ...
+def validate_domain_document(raw: object) -> list[DomainViolation]:
+    """structural 違反を全件返す。違反がなければ空リスト（semantic はパース時）。"""
+def semantic_violations_from_validation_error(exc: ValidationError) -> list[DomainViolation]:
+    """pydantic ValidationError → kind=semantic の DomainViolation 列へ変換。"""
 ```
 
 #### prototype_store
@@ -561,6 +580,7 @@ def validate_domain_document(raw: object) -> list[SchemaViolation]: ...
 - プロトタイプ（`prototype_id`＋埋め込み）を保持し、登録時に L2 正規化して `faiss.IndexFlatIP` を構築する。照会埋め込みも `nearest`／`similarities` の内部で L2 正規化する（正規化を呼び出し側に委ねない）。
 - kNN 検索（要件 1.2）と、指定 `prototype_ids` への類似度計算（match 判定用）の両方を提供する。**類似度の定義（L2 正規化を含む）はこのモジュールだけが持つ**（cosine、[-1, 1]、高いほど近い）。要件 2.5 はこの一元化で構造的に保証される。
 - `model/ports.py` の `SimilaritySource` Protocol を構造的に満たす（明示継承しない）。Phase 8 で patch-feature-store の実装に差し替える seam であり、差し替え先も同 Protocol を満たせば engine・公開 API の変更は不要。公開 API はドメイン操作（近傍検索・類似度）のみで、FAISS の型・関数は外に出さない。
+- cosine が一意に定義されない入力は構築時・照会時に拒否する（設計検証 DESIGN-ARCH-007 対応。下記 Preconditions）。
 
 ##### Service Interface (prototype_store)
 
@@ -572,21 +592,24 @@ class PrototypeStore:  # model/ports.py の SimilaritySource を構造的に充�
     def similarities(self, embedding: np.ndarray, prototype_ids: Sequence[int]) -> dict[int, float]: ...
 ```
 
-- Preconditions: `embeddings.shape == (len(prototype_ids), dim)`、`prototype_id` は一意。
-- Postconditions: `nearest` は類似度降順。`similarities` は要求 id 全件を返す（未登録 id は `KeyError`。Phase 0–3 に dangling は存在しない）。
+- Preconditions（`build`）: `len(prototype_ids) >= 1`（空集合拒否）、`embeddings.shape == (len(prototype_ids), dim)` かつ `dim >= 1`、`prototype_id` は一意、埋め込みはすべて有限値（NaN／Inf なし）、各行の L2 ノルム > 0（ゼロノルム拒否。L2 正規化が未定義になるため）。違反は `ValueError`。
+- Preconditions（`nearest`／`similarities`）: 照会埋め込みの shape は `(dim,)`（構築時の次元と一致）、有限値、L2 ノルム > 0。`nearest` の `k` は `1 <= k <= 登録件数`。違反は `ValueError`。
+- Postconditions: `nearest` は類似度降順。`similarities` は要求 id 全件を返す（未登録 id は `KeyError`。Phase 0–3 に dangling は存在しない）。類似度は [-1, 1] に収まる。
 
 #### domain_loader
 
-| Field        | Detail                                                 |
-| ------------ | ------------------------------------------------------ |
-| Intent       | ドメイン定義 JSON のロード・検証委譲・複数ドメイン合成 |
-| Requirements | 1.1, 5.2, 6.1, 6.4                                     |
+| Field        | Detail                                                           |
+| ------------ | ---------------------------------------------------------------- |
+| Intent       | ドメイン定義 JSON のロード・違反集約・複数ドメイン合成・索引構築 |
+| Requirements | 1.1, 5.2, 5.3, 5.5, 5.6, 6.1, 6.2, 6.4                           |
 
 ##### Responsibilities & Constraints (domain_loader)
 
-- 指定パス群の JSON を読み、`schema.validate_domain_document` → `DomainDefinition` パースの順で検証する。いずれかのファイルに違反があれば `DomainValidationError`（ファイル別の違反一覧を保持）で fail-fast する（部分縮退はしない。理由は research.md の Design Decisions 参照）。
+- 指定パス群の JSON を読み、次の順で検証・合成する。いずれかの段階で違反があれば**全ファイルの検証を完了してから** `DomainValidationError`（ファイル別の `DomainViolation` 一覧）で fail-fast する（部分縮退はしない。理由は research.md の Design Decisions 参照）:
+  1. `schema.validate_domain_document` → `kind=structural` の違反を収集
+  2. `DomainDefinition` パース → pydantic 失敗時は `semantic_violations_from_validation_error` で `kind=semantic` に変換して収集（要件 5.3／5.5／5.6）
+  3. 全ファイルのパース成功後、`element_id` の**全ドメイン横断の一意性**を検証し、重複は `kind=cross_file` の `DomainViolation` として**重複に関与する全ファイル**の一覧へ載せる（`json_path` は当該ファイル内の要素パス、`related_paths` は他ファイルの対応パス。設計メモ §6.3）
 - 全ドメインの要素を「レコード＋由来ドメイン軸」（`records.EffectiveRecord`）に展開して `DomainSet` へ合成する（要件 6.1）。ファイルに存在しない要素は有効集合に含まれない（削除＝不在。要件 6.4）。
-- `element_id` の**全ドメイン横断の一意性**を検証し、重複は `DomainValidationError` とする（チェーン最終段のタイブレークの前提。設計メモ §6.3）。
 - **ロード時に不変のドメイン索引を構築する**（段階計画 Phase 3 の「合成インメモリ索引」、設計メモ §10 の線形スキャン禁止）。索引のキーは**由来ドメイン定義の軸パターンそのもの**（各軸が具体値または `any`）で、値は当該パターンのレコード列。判定時は入力パッチの具体 4 軸から、各軸を `any` に落とした組合せ 2^4 = 16 個のキーを生成して引き当て、候補だけを `matching` へ渡す。有効レコード総数によらず参照は定数回で、全レコード走査は行わない。
   - パターン側をキーにすることで、**ドメイン定義に現れない未知ドメインの入力でも広域（`any`）レコードが正しく引ける**（入力側キーを索引化すると未知ドメインで広域ルールを取りこぼす）。
   - 引き当ては specificity 降順（非 `any` 軸数の多いキーから）で行い、`resolution` へ渡す候補列の順序を入力ファイルの並びに依存させない。
@@ -607,13 +630,14 @@ class DomainSet:
         ドメイン軸に適合する候補のみを specificity 降順で返す（線形走査しない）。"""
 
 class DomainValidationError(Exception):
-    violations: Mapping[str, list[SchemaViolation]]   # ファイルパス → 違反一覧
+    violations: Mapping[str, list[DomainViolation]]   # ファイルパス → 違反一覧（structural/semantic/cross_file）
 
 def load_domain_set(paths: Sequence[Path]) -> DomainSet: ...
 ```
 
 - Invariants: `index` の全エントリの和は `records` に一致する（各レコードはちょうど 1 つのパターンキーに属する）。構築後は不変。
 - Postconditions: `candidates` の戻り値は、同じ `DomainSet` と同じ入力軸に対して常に同一の並び。
+- Error contract: `DomainValidationError.violations` は空でない。同一ロードで検出した structural／semantic／cross_file をすべて含み、要件 5.2 の「拒否理由の報告」をこの 1 例外で満たす。
 
 ### 判定ロジック層（decision/）
 
@@ -861,9 +885,10 @@ class FinalJudgment:
 
 ### エラー戦略
 
-- **ロード時（構成エラー）**: 不正なドメイン定義は `DomainValidationError` で fail-fast。全ファイル・全違反（JSON パス＋理由）を保持し、拒否理由の報告（要件 5.2）を満たす。部分縮退はしない（有効集合が暗黙に変わると判定結果が静かに変化するため）。
+- **ロード時（構成エラー）**: 不正なドメイン定義は `DomainValidationError` で fail-fast。structural／semantic／cross_file の全違反をファイル別に保持し、拒否理由の報告（要件 5.2）を満たす。部分縮退はしない（有効集合が暗黙に変わると判定結果が静かに変化するため）。
+- **ストア構築時・照会時（契約違反）**: `PrototypeStore.build`／`nearest`／`similarities` の Preconditions 違反（空集合・NaN／Inf・ゼロノルム・次元不一致・不正な `k`）は `ValueError`（設計検証 DESIGN-ARCH-007）。
 - **実行時（契約違反）**: `PatchInput` の embedding 次元不一致・`any` を含む入力ドメイン軸など呼び出し側の契約違反は `ValueError`。検証済み `DomainSet` と構築済みストアを前提とするため、判定パイプライン内部に防御的分岐は置かない。
-- **想定内の空集合**: 適用候補なしは正常系（一次判定をそのまま返す。要件 2.4）。エラーにしない。
+- **想定内の空集合**: 適用候補なしは正常系（一次判定をそのまま返す。要件 2.4）。エラーにしない（ストア自体の空は構築時に拒否済み）。
 
 ### Monitoring
 
@@ -873,16 +898,17 @@ Phase 0–3 はテスト駆動の検証段階のためログ基盤は導入し�
 
 ### Unit Tests
 
-- `records`: 8 フィールド全解釈（5.1）、action×method の許容・拒否の全 8 組合せ（4.4、5.3）、params 形の検証（weight ≤ 0 拒否・未知キー拒否）、類似度条件の対制約（片方だけの指定を拒否。5.5）、action×params の方向矛盾の拒否（5.6）、`recorded_at` の非 UTC 拒否
-- `schema`: フィールド欠落・型不一致・enum 定義外それぞれの違反レポート内容（5.2）、複数違反の全件報告
-- `prototype_store`: 既知ベクトルでの kNN の id・類似度の厳密値（1.2）、`similarities` の一致性（2.5: `nearest` と同値になること）、未正規化の照会ベクトルが正規化済み入力と同一結果になること（照会時 L2 正規化のストア一元化の契約）
+- `records`: 8 フィールド全解釈（5.1）、action×method の許容・拒否の全 8 組合せ（4.4、5.3）、params 形の検証（weight ≤ 0 拒否・未知キー拒否）、類似度条件の対制約（片方だけの指定を拒否。5.5）、`similarity_threshold` の範囲外（<-1／>1／NaN）拒否（DESIGN-ARCH-007）、action×params の方向矛盾の拒否（5.6）、`recorded_at` の非 UTC 拒否
+- `schema`: フィールド欠落・型不一致・enum 定義外それぞれの違反レポート内容（5.2）、複数違反の全件報告、`semantic_violations_from_validation_error` が pydantic の loc を JSON Pointer 風パスへ変換すること
+- `prototype_store`: 既知ベクトルでの kNN の id・類似度の厳密値（1.2）、`similarities` の一致性（2.5: `nearest` と同値になること）、未正規化の照会ベクトルが正規化済み入力と同一結果になること（照会時 L2 正規化のストア一元化の契約）、拒否経路（空集合・NaN／Inf・ゼロノルム・次元不一致・不正な `k`）がそれぞれ `ValueError` になること（DESIGN-ARCH-007）
 - `primary`: `anomaly_score > threshold` の境界値（等号側は Negative）（1.3）
 - `matching`: 閾値ちょうど（≥ で充足）・未達除外（2.2、2.3）、複数条件 AND（5.4）、類似度条件なしレコードがそのまま適用対象になること（2.6）
 - `correction`: 4 action × 適用可能 method の全経路の一次→二次変換（3.1–3.3、4.1–4.3）
 
 ### Integration Tests
 
-- `domain_loader`: 複数ドメイン JSON の合成（6.1）、`element_id` 重複の拒否、不正ファイル混在時の fail-fast（5.2）
+- `domain_loader`: 複数ドメイン JSON の合成（6.1）、不正ファイル混在時の fail-fast（5.2）
+- `domain_loader` の違反集約（DESIGN-ARCH-006、要件 5.2／5.3／5.5／5.6）: `load_domain_set` 経由で (a) structural（フィールド欠落）、(b) semantic（action×method 違反・類似度条件の片方だけ・params 方向矛盾）、(c) cross_file（`element_id` 重複。両ファイルのパスが `related_paths` に載る）の各経路が `DomainValidationError` に集約されること。複数種別が混在するロードでも全違反が報告されること
 - `domain_loader` の索引（6.2、設計メモ §10）: `candidates` が返す集合が全レコード走査でドメイン軸照合した結果と一致すること（索引と素朴実装の等価性。hypothesis でランダムなドメイン定義と入力軸に対して検証）、`any` 軸レコードが**ドメイン定義に存在しない未知ドメインの入力**でも引けること、戻り値が specificity 降順かつ入力ファイル順に非依存であること
 - `engine` E2E（Phase 1 の確認そのもの）: 一次 Positive のパッチが登録済みプロトタイプ近傍で「許容」に反転する（2.2＋3.1＋8.1）
 - `engine` E2E: 適用候補なしで一次判定がそのまま最終判定になる（2.4）、ReviewRequired 適用で「要確認」（3.4）

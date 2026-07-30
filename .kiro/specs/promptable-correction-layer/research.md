@@ -205,6 +205,29 @@
 - **Selected Approach**: fail-fast を採用。`DomainValidationError` が違反一覧（ファイル・パス・理由）を保持する。
 - **Rationale**: 設計メモ §11 は「検証は publish 前に実施し、合格したものだけを publish」という fail-fast 思想であり、Phase 0–3 の fixture 運用では部分縮退の必要がない。
 - **Trade-offs**: 大量ドメイン運用での部分縮退はできないが、それは Phase 4 以降の publish ゲートの責務。
+- **Follow-up**: 設計検証（2026-07-30、DESIGN-ARCH-006）で「`DomainValidationError` が `SchemaViolation` しか保持せず、semantic・cross_file 違反を表現できない」と指摘されたため、統一違反型 `DomainViolation`（`kind ∈ {structural, semantic, cross_file}`）へ拡張し、pydantic `ValidationError` の変換規則と `element_id` 重複の両ファイル報告を設計へ追加した（下記 Decision）。
+
+### Decision: 検証違反は統一型 `DomainViolation`（kind で経路を区別）に集約する
+
+- **Context**: 設計検証 DESIGN-ARCH-006。拒否経路は (a) jsonschema 構造、(b) pydantic 意味制約（要件 5.3／5.5／5.6）、(c) ファイル横断 `element_id` 重複の 3 系統あるが、エラー型が構造違反専用だった。
+- **Alternatives Considered**:
+  1. 経路ごとに別例外（`SchemaError`／`SemanticError`／`DuplicateIdError`）— 呼び出し側が複数 catch し、要件 5.2 の「拒否理由の報告」が分散する。
+  2. すべてを `SchemaViolation`（json_path＋message）に押し込む — cross_file の関連箇所を表現できない。
+  3. 統一型 `DomainViolation`（`kind`＋`json_path`＋`message`＋任意 `related_paths`）を 1 例外 `DomainValidationError` に集約する。
+- **Selected Approach**: 3 を採用。`load_domain_set` は全ファイルの検証を完了してから 1 例外で全違反を返す。pydantic の `loc` は JSON Pointer 風パスへ変換する。
+- **Rationale**: 要件 5.2 の報告契約を単一の出口に揃え、テストも `load_domain_set` 経由の 3 経路に固定できる。
+- **Trade-offs**: `kind` の追加は共有語彙の拡張だが、llm-feedback-structuring が消費するのは JSON Schema 側であり、実行時例外型には波及しない。
+- **Follow-up**: なし。
+
+### Decision: PrototypeStore／MatchCriteria は cosine が定義可能な入力だけを受け付ける
+
+- **Context**: 設計検証（2026-07-30、DESIGN-ARCH-007）。`PrototypeStore` の Preconditions が shape・ID 一意性だけで、空集合・NaN／Inf・ゼロノルムでは cosine／L2 正規化が未定義になる。
+- **Alternatives Considered**:
+  1. 実行時に黙ってスキップ／ゼロ埋め — 判定結果が静かに壊れる（要件 2.5 の同一尺度保証に反する）。
+  2. 構築時・照会時に明示拒否（`ValueError`）し、`similarity_threshold` も [-1, 1] に制限する。
+- **Selected Approach**: 2 を採用。`build` は非空・有限値・非ゼロノルム・ID 一意・shape 一致、`nearest`／`similarities` は次元一致・有限値・非ゼロノルム・正当な `k`、`MatchCriteria.similarity_threshold` は有限かつ [-1, 1]。各拒否経路を単体テストで固定する。
+- **Rationale**: cosine 類似度の値域と計算前提を境界で閉じ、判定パイプライン内部に防御的分岐を置かない既存方針と整合する。
+- **Trade-offs**: 合成 fixture の生成側にも同じ制約が必要になる（conftest で正規化済み有限ベクトルを出す）。
 - **Follow-up**: なし。
 
 ### Decision: パッケージは `src/correction_layer/` の層サブパッケージ構成、依存方向は import-linter で機械検査
@@ -228,11 +251,12 @@
   3. `model/ports.py` に `SimilaritySource` Protocol と `NeighborHit` を定義 — engine は port にのみ依存し、`boundary/prototype_store` は Protocol を構造的に充足する（明示継承なし）。依存方向（model ← boundary／engine）が保たれ、port の語彙が最内側に揃う。
 - **Selected Approach**: 3 を採用。import-linter の model 内契約を「`records` → `types`／`ports`」に拡張。
 - **Rationale**: 設計が宣言する Phase 8 seam（ストア差し替えで engine・公開 API 不変）を型レベルで成立させる。
-- **不採用とした指摘（2026-07-30 の再検証でも継続指摘されたが方針を維持）**:
+- **不採用とした指摘（DESIGN-ARCH-002。2026-07-30 に 3 回連続で同一内容が再燃）**:
   - **合成 `PrototypeStore`・`load_domain_set` のルート公開**: Phase 0–3 は「合成データのみで一連の判定処理を完了する」ことが要件 1.4 であり、パッケージ利用者（テスト・フィクスチャ・E2E）がストアとドメイン定義を構築できる必要がある。engine が port に依存する以上、公開されていても Phase 8 の差し替えは阻害されない。testing 用サブ API へ隔離するのは、実物実装が入る Phase 8 で `boundary/` の構成を見直す際に判断する。
   - **`domain_definition_json_schema() -> dict[str, Any]`**: pydantic `model_json_schema()` の標準戻り型であり、再帰的な JSON 型を自作しても得られるのは戻り値の静的表現だけで、スキーマの内容的な正しさは担保されない（正しさは pydantic モデルが権威）。コストに見合わない。
+  - **堂々巡り判定**: 本質部分（engine の Protocol 依存）は第 1 回で解消済み。残りの公開範囲・`Any` は第 1・第 2 回で不採用根拠を research.md と `__init__.py` コメントに明記したうえで、第 3 回も同一主張が再燃した。方針相違として **resolved（won’t fix）** 扱いとし、以降の検証ではブロッキング指摘に再オープンしない（takt-sdd Policy「堂々巡りの検出」）。
 - **Trade-offs**: model 層が numpy 型（`ndarray`）に依存するが、`PatchInput.roi_embedding` が既に保持しており新規の依存ではない。
-- **Follow-up**: Phase 8 で patch-feature-store のアダプタが同 Protocol を満たすことを統合テストで確認する。
+- **Follow-up**: Phase 8 で patch-feature-store のアダプタが同 Protocol を満たすことを統合テストで確認する。公開 API の縮小は Phase 8 の seam 確定時に再検討する（いまはしない）。
 
 ### Decision: ドメイン軸の絞り込みは軸パターン索引（入力側キーではなくレコード側パターンをキーにする）
 
@@ -270,6 +294,8 @@
 - specificity の暫定定義が Phase 7（上位クラス階層）で変わる — 定義を `decision/resolution.py` の単一関数に局所化し、hypothesis の決定性性質テストを差し替え時の回帰ゲートにする。
 - ドメイン軸照合が索引実装（`boundary/domain_loader.py`）に集約されたことで、索引のバグがそのまま誤適用になる — 索引と素朴な全走査の等価性を hypothesis の性質テストで固定し、未知ドメイン入力に対する `any` レコードの引き当ても明示的に検証する。
 - 浮動小数点比較の境界（`anomaly_score > threshold`・`similarity >= similarity_threshold`）の不一致 — 比較の向き・等号の有無をデータモデル定義に明文化し、境界値テストを必須にする。
+- cosine 入力の不正（NaN／ゼロノルム等）が静かに壊れた判定を生む — `PrototypeStore` の Preconditions と拒否テストで境界に閉じる（DESIGN-ARCH-007）。
+- 検証経路ごとの例外分散で拒否理由の報告が漏れる — `DomainViolation` への集約と `load_domain_set` 経由の 3 経路テストで防ぐ（DESIGN-ARCH-006）。
 - `recorded_at` 同時刻の衝突 — チェーン最終段の `element_id` タイブレークで総順序が保証される（§9.1 rule5）。hypothesis で同時刻ケースを生成して検証する。
 - 合成一次判定（kNN＋固定閾値）が実物（primary-anomaly-detection）と乖離する — 一次判定を `decision/primary.py` に隔離し、Phase 8 で差し替える seam を design.md の境界コミットメントに明記。
 
