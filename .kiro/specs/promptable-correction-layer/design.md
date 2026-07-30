@@ -107,13 +107,14 @@ graph TB
     AxisExact --> Ports
     AxisExact --> Types
     Records --> Types
+    Ports --> Types
     DomainSetNode --> Records
     DomainSetNode --> Ports
     DomainSetNode --> Types
     Store --> Ports
 ```
 
-**依存方向（import-linter の契約で機械検査。違反は CI エラー）**: `model`（`types`／`ports` → `records`／`domain_set`）→ `boundary`（`schema`／`prototype_store` → `domain_loader`）／`decision`（`primary`／`matching`／`correction`／`resolution`／`axis_matching`）→ `engine`。逆方向 import と循環は禁止。`boundary` と `decision` は互いに import しない。`decision` 内の各モジュールも互いに import しない（`engine` が合成する）。`engine` は boundary の具体型に依存せず、`model/ports.py` の `SimilaritySource`／`AxisMatcher` と `model/domain_set.py` の `DomainSet` に依存する（実体は構築時に注入。`load_domain_set` は engine 外の組み立てで呼ぶ）。契約の定義は Modified Files の `[tool.importlinter]` を参照。
+**依存方向（import-linter の契約で機械検査。違反は CI エラー）**: `model`（`domain_set` → `records`／`ports` → `types`）→ `boundary`（`schema`／`prototype_store` → `domain_loader`）／`decision`（`primary`／`matching`／`correction`／`resolution`／`axis_matching`）→ `engine`。逆方向 import と循環は禁止。`boundary` と `decision` は互いに import しない。`decision` 内の各モジュールも互いに import しない（`engine` が合成する）。`records` と `ports` は互いに import しない（どちらも `types` のみに依存）。`engine` は boundary の具体型に依存せず、`model/ports.py` の `SimilaritySource`／`AxisMatcher` と `model/domain_set.py` の `DomainSet` に依存する（実体は構築時に注入。`load_domain_set` は engine 外の組み立てで呼ぶ）。契約の定義は Modified Files の `[tool.importlinter]` を参照。
 
 **Key Decisions**:
 
@@ -149,9 +150,11 @@ graph TB
 ```text
 src/
 └── correction_layer/
-    ├── __init__.py              # 公開 API（CorrectionEngine・SimilaritySource・コア型・JSON Schema 出力に加え、
-    │                            #   合成データ構築用の PrototypeStore・load_domain_set。後者の公開は Phase 0–3 が
-    │                            #   合成データで自己完結する意図的な選択。根拠は research.md）
+    ├── __init__.py              # 公開 API（要件 1.1 の組み立てをルートから閉じる）:
+    │                            #   CorrectionEngine・SimilaritySource・AxisMatcher・DomainSet・コア型・
+    │                            #   JSON Schema 出力、および合成用 PrototypeStore・load_domain_set・
+    │                            #   ExactAnyAxisMatcher・DomainValidationError。
+    │                            #   根拠は research.md（DESIGN-ARCH-002／012）
     ├── model/                   # モデル層（最内側。パッケージ内の誰にも依存しない）
     │   ├── __init__.py
     │   ├── types.py             # コア型: ラベル enum・DomainAxes（定義・any 可）・
@@ -230,11 +233,12 @@ modules = [
 ]
 
 [[tool.importlinter.contracts]]
-name = "model 内は records／domain_set → types／ports の一方向"
+name = "model 内は domain_set → records／ports → types の一方向"
 type = "layers"
 layers = [
-    "correction_layer.model.records : correction_layer.model.domain_set",
-    "correction_layer.model.types : correction_layer.model.ports",
+    "correction_layer.model.domain_set",
+    "correction_layer.model.records : correction_layer.model.ports",
+    "correction_layer.model.types",
 ]
 
 [[tool.importlinter.contracts]]

@@ -249,10 +249,10 @@
   1. 現状維持 — engine は composition root なので具体型を知ってよい、という立場。ただし公開 API の型注釈が合成実装へ固定され、差し替え時に公開シグネチャの変更が必要になる。
   2. 消費側（engine 内）で Protocol を定義 — Python の構造的部分型の慣行には沿うが、戻り値型 `NeighborHit` が boundary に残り、port の語彙が 2 層に分裂する。
   3. `model/ports.py` に `SimilaritySource` Protocol と `NeighborHit` を定義 — engine は port にのみ依存し、`boundary/prototype_store` は Protocol を構造的に充足する（明示継承なし）。依存方向（model ← boundary／engine）が保たれ、port の語彙が最内側に揃う。
-- **Selected Approach**: 3 を採用。import-linter の model 内契約を「`records` → `types`／`ports`」に拡張。
+- **Selected Approach**: 3 を採用。import-linter の model 内契約は `domain_set` → `records`／`ports` → `types`（設計検証 DESIGN-ARCH-011。`domain_set`→`records` と `ports`→`types` を同一層禁止にしない）。
 - **Rationale**: 設計が宣言する Phase 8 seam（ストア差し替えで engine・公開 API 不変）を型レベルで成立させる。
 - **不採用とした指摘（DESIGN-ARCH-002。2026-07-30 に 3 回連続で同一内容が再燃）**:
-  - **合成 `PrototypeStore`・`load_domain_set` のルート公開**: Phase 0–3 は「合成データのみで一連の判定処理を完了する」ことが要件 1.4 であり、パッケージ利用者（テスト・フィクスチャ・E2E）がストアとドメイン定義を構築できる必要がある。engine が port に依存する以上、公開されていても Phase 8 の差し替えは阻害されない。testing 用サブ API へ隔離するのは、実物実装が入る Phase 8 で `boundary/` の構成を見直す際に判断する。
+  - **合成組み立て面のルート公開**（`PrototypeStore`・`load_domain_set`・`DomainSet`・`AxisMatcher`・`ExactAnyAxisMatcher`・`DomainValidationError`）: Phase 0–3 は「合成データのみで一連の判定処理を完了する」ことが要件 1.4／1.1 であり、パッケージ利用者がストア・ドメイン定義・照合実装を組み立てられる必要がある（設計検証 DESIGN-ARCH-012 で欠落分を追加）。engine が port に依存する以上、公開されていても Phase 8 の差し替えは阻害されない。testing 用サブ API へ隔離するのは、実物実装が入る Phase 8 で `boundary/` の構成を見直す際に判断する。
   - **`domain_definition_json_schema() -> dict[str, Any]`**: pydantic `model_json_schema()` の標準戻り型であり、再帰的な JSON 型を自作しても得られるのは戻り値の静的表現だけで、スキーマの内容的な正しさは担保されない（正しさは pydantic モデルが権威）。コストに見合わない。
   - **堂々巡り判定**: 本質部分（engine の Protocol 依存）は第 1 回で解消済み。残りの公開範囲・`Any` は第 1・第 2 回で不採用根拠を research.md と `__init__.py` コメントに明記したうえで、第 3 回も同一主張が再燃した。方針相違として **resolved（won’t fix）** 扱いとし、以降の検証ではブロッキング指摘に再オープンしない（takt-sdd Policy「堂々巡りの検出」）。
 - **Trade-offs**: model 層が numpy 型（`ndarray`）に依存するが、`PatchInput.roi_embedding` が既に保持しており新規の依存ではない。
