@@ -1,0 +1,20 @@
+{
+  "domain": {
+    "process": "semicont:DeepReactiveIonEtchProcess",
+    "material": "any",
+    "equipment": "any",
+    "unit_of_work": "semicont:Wafer"
+  },
+  "elements": [
+    {
+      "element_id": 302,
+      "action": "NotAnAction",
+      "method": "LabelOverride",
+      "params": {},
+      "match": {},
+      "recorded_at": "2026-05-03T09:00:00Z",
+      "attributed_to": "op_bad",
+      "source_ref": "annotation:ann-bad-action"
+    }
+  ]
+}

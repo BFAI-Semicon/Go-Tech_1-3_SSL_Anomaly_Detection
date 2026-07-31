@@ -1,0 +1,23 @@
+{
+  "domain": {
+    "process": "semicont:ChemicalMechanicalPolishProcess",
+    "material": "any",
+    "equipment": "semicont:PolishTool",
+    "unit_of_work": "semicont:Wafer"
+  },
+  "elements": [
+    {
+      "element_id": 201,
+      "action": "OverridePositive",
+      "method": "ScoreReweight",
+      "params": { "weight": 1.2 },
+      "match": {
+        "prototype_ids": [20],
+        "similarity_threshold": 0.8
+      },
+      "recorded_at": "2026-05-02T08:00:00Z",
+      "attributed_to": "op_b",
+      "source_ref": "annotation:ann-b-201"
+    }
+  ]
+}

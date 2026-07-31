@@ -1,0 +1,20 @@
+{
+  "domain": {
+    "process": "any",
+    "material": "any",
+    "equipment": "any",
+    "unit_of_work": "semicont:Wafer"
+  },
+  "elements": [
+    {
+      "element_id": 301,
+      "action": "OverrideNegative",
+      "method": "LabelOverride",
+      "params": {},
+      "match": {},
+      "recorded_at": "2026-06-20T10:00:00Z",
+      "attributed_to": "op_e2e",
+      "source_ref": "annotation:ann-e2e-301"
+    }
+  ]
+}

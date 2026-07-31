@@ -50,6 +50,8 @@ dev = [
     "matplotlib>=3.8",
     "ruff>=0.6",
     "pytest>=8",
+    "hypothesis>=6",
+    "import-linter>=2",
 ]
 
 [tool.uv]
@@ -78,3 +80,47 @@ anomalib = { git = "https://github.com/open-edge-platform/anomalib.git", branch 
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.importlinter]
+root_package = "correction_layer"
+
+[[tool.importlinter.contracts]]
+name = "層の依存方向（外側から内側のみ）"
+type = "layers"
+layers = [
+    "correction_layer.engine",
+    "correction_layer.boundary : correction_layer.decision",
+    "correction_layer.model",
+]
+
+[[tool.importlinter.contracts]]
+name = "decision 内のモジュールは互いに独立（engine が合成）"
+type = "independence"
+modules = [
+    "correction_layer.decision.primary",
+    "correction_layer.decision.matching",
+    "correction_layer.decision.axis_matching",
+    "correction_layer.decision.resolution",
+    "correction_layer.decision.correction",
+]
+
+[[tool.importlinter.contracts]]
+name = "model 内は domain_set → records／ports → types の一方向"
+type = "layers"
+layers = [
+    "correction_layer.model.domain_set",
+    "correction_layer.model.records : correction_layer.model.ports",
+    "correction_layer.model.types",
+]
+
+[[tool.importlinter.contracts]]
+name = "boundary 内は domain_loader → schema／prototype_store の一方向"
+type = "layers"
+layers = [
+    "correction_layer.boundary.domain_loader",
+    "correction_layer.boundary.schema : correction_layer.boundary.prototype_store",
+]
