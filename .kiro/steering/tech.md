@@ -19,19 +19,19 @@
 - **Language**: Python 3.12 固定（`<3.13`）
 - **Runtime target**: NVIDIA DGX Spark（aarch64 / Grace Blackwell / CUDA 13）
 - **Tooling**: mise（Python / uv / Node）＋ uv（`.venv`・lock）
-- **ML stack**: PyTorch cu130、anomalib（暫定 GitHub main）、timm、faiss-cpu、numpy／scipy／sklearn
+- **ML stack**: PyTorch cu130、anomalib（>=2.6、<3）、timm、faiss-cpu、numpy／scipy／sklearn
 - **Schema / validation**: pydantic v2、jsonschema
 - **LLM clients**（optional extra）: openai（vLLM 互換）、ollama
 
 ## Key Libraries（パターンに効くものだけ）
 
-| 領域                       | 採用の型                                                      |
-| -------------------------- | ------------------------------------------------------------- |
-| 特徴抽出・異常検知枠       | anomalib + timm（DINOv3）。重みは固定利用                     |
-| 近傍探索                   | FAISS Flat（CPU）。版管理着手前に Lance／LanceDB スパイク予定 |
-| ドメイン定義・補正レコード | pydantic モデルが権威。JSON Schema は派生                     |
-| 性質テスト・依存検査       | hypothesis、import-linter                                     |
-| ライブラリ選定の詳細       | `docs/library-adoption-proposal.md` に従う                    |
+| 領域                       | 採用の型                                                       |
+| -------------------------- | -------------------------------------------------------------- |
+| 特徴抽出・異常検知枠       | anomalib `TimmFeatureExtractor` + timm（DINOv3）。抽出のみ利用 |
+| 近傍探索                   | FAISS Flat（CPU）。版管理着手前に Lance／LanceDB スパイク予定  |
+| ドメイン定義・補正レコード | pydantic モデルが権威。JSON Schema は派生                      |
+| 性質テスト・依存検査       | hypothesis、import-linter                                      |
+| ライブラリ選定の詳細       | `docs/library-adoption-proposal.md` に従う                     |
 
 ## Development Standards
 
@@ -75,7 +75,9 @@ mise run lint-md
 ## Key Technical Decisions
 
 - **重み固定・推論時適応** — ViT を更新せず、メモリバンク／プロトタイプ／適用条件で適応する
-- **anomalib は暫定 main** — DINOv3 対応リリースが PyPI に出たらピン留めへ切替
+- **特徴抽出器は Protocol で切替** — 実装は DINOv3（anomalib `TimmFeatureExtractor`）。
+  比較用 DINOv2／DINO／ImageNet CNN はバックボーン名の設定切替。MAE は将来検討
+- **anomalib は特徴抽出のみ** — ストア・スコア化・coreset は自前。依存は PyPI `>=2.6,<3`
 - **FAISS は CPU** — aarch64 で公式 GPU wheel が無い。必要なら後でソースビルド／cuVS を検討
 - **LLM ランタイムはコンテナ側** — アプリ依存は OpenAI 互換／Ollama クライアントに閉じる
 - **仕様駆動** — 機能は `.kiro/specs/{feature}/` で requirements→design→tasks→impl。

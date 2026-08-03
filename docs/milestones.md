@@ -73,7 +73,7 @@
 
 - **目的**：固定ViTの特徴抽出と特徴量ストアを立ち上げ
 - **主タスク**：
-  - DINOv2埋め込み＋MAE再構成誤差のパッチ単位生成
+  - DINOv3埋め込みのパッチ単位生成（anomalib TimmFeatureExtractor。MAE再構成は将来検討）
   - FAISS等のkNN基盤（工程/材料/装置タグでメタ分割）構築
   - 独自データのタイル化・パッチ化（テーマ1の前処理を共通化）
 - **主な狙い**：特徴抽出＋ストアのプロトタイプ、初期インデックス設計
@@ -82,8 +82,8 @@
 
 - **目的**：一次検出の動作確立と特徴抽出器の優劣を定量化
 - **主タスク**：
-  - 埋め込み逸脱（PatchCore on DINOv2）＋MAE再構成誤差の融合
-  - 特徴抽出器比較（ImageNet教師ありCNN vs DINO/DINOv2 vs DINO+MAE vs C-RADIOv2）
+  - 埋め込み逸脱（Mahalanobis ＋ PatchCore系 kNN on DINOv3）
+  - 特徴抽出器比較（DINOv3主軸 vs ImageNet教師ありCNN vs DINO/DINOv2。バックボーン切替）
   - 工程内汎化 vs 工程横断（Si↔化合物）の劣化曲線を取得
 - **主な狙い**：一次検出ベンチ、特徴抽出器比較レポート、汎化劣化曲線
 

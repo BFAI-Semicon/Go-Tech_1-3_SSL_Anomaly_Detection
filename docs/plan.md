@@ -3,8 +3,8 @@
 ## 全体方針
 
 PatchCore の蒸留による軽量化を主軸に既存手法を深化させるとともに、
-自己教師あり学習（DINOv3 を主軸に DINO / DINOv2 / MAE 等で事前学習した ViT を重み固定で活用）
-による欠陥検出手法を開発し検証する。
+自己教師あり学習（DINOv3 を主軸に、比較用として DINO / DINOv2 / ImageNet CNN を
+バックボーン切替で活用。重み固定）による欠陥検出手法を開発し検証する。
 
 - データ：MIIC ＋ 独自データ
 - 評価：AUROC / AUPRC / F1 /（領域）IoU・PRO
@@ -28,9 +28,10 @@ PatchCore の蒸留による軽量化を主軸に既存手法を深化させる�
 #### 【１－３】自己教師あり学習に基づく異常判定機能の設計
 
 - 自己教師あり学習（SSL）：正常データから疑似ラベル（予測タスク）を自動生成し汎用特徴を獲得
-  （SSL 事前学習 ViT は DINOv3 を主軸に DINO/DINOv2/MAE/C-RADIOv2 を選定＋ライセンス法務確認）
+  （SSL 事前学習 ViT は DINOv3 を主軸。比較用に DINOv2／DINO／ImageNet CNN をバックボーン切替で利用。
+  ライセンス法務確認。MAE・C-RADIOv2 は将来検討）
 - FAISS 特徴量ストア基盤構築
-- 一次検出（PatchCore on DINOv3 ＋ MAE 再構成誤差の融合）
+- 一次検出（PatchCore on DINOv3：Mahalanobis ＋ kNN。MAE 再構成誤差は将来検討）
 - 人間フィードバック機能（ROI＋自然言語）＋ LLM 構造化（JSON）＋ 補正レイヤ
   （スコア再重み付け・閾値適応・ラベル上書き）
 - 評価軸検証（ROI vs 言語 vs 併用、工程内 vs 横断汎化）
@@ -100,15 +101,16 @@ PatchCore の蒸留による軽量化を主軸に既存手法を深化させる�
 
 ## 自己教師あり学習による Promptable Patch Retrieval
 
-`researches.md` に基づく、自己教師あり学習（DINO 系の自己蒸留／MAE のマスク再構成）で
+`researches.md` に基づく、自己教師あり学習（DINO 系の自己蒸留）で
 獲得した ViT 表現を**重み固定のまま（推論時適応）** 用いる工程横断欠陥検出。
 
 ### 構成要素
 
-- **Self-Supervised Learning (SSL) 事前学習 ViT（重み固定）**：DINOv3 系
-  （DINOv2 等も比較）の埋め込みと MAE 再構成誤差をパッチ単位で生成
+- **Self-Supervised Learning (SSL) 事前学習 ViT（重み固定）**：DINOv3 を主軸とし、
+  anomalib `TimmFeatureExtractor` でパッチ埋め込みを生成。比較用に DINOv2／DINO／
+  ImageNet CNN をバックボーン切替で利用（MAE 再構成は将来検討）
 - **特徴量ストア**：FAISS 等による kNN 近傍検索基盤（工程・材料・装置タグでメタ分割）
-- **一次検出**：埋め込み逸脱（PatchCore on DINOv3 等）と MAE 再構成誤差の融合
+- **一次検出**：埋め込み逸脱（Mahalanobis ＋ PatchCore 系 kNN on DINOv3）
 - **人間フィードバック**：ROI 丸付け ＋ 自然言語コメント
 - **LLM 構造化**：コメント → JSON（scope / judgment / priority）
 - **補正レイヤ**：スコア再重み付け / 閾値適応 / ラベル上書き
@@ -120,7 +122,7 @@ PatchCore の蒸留による軽量化を主軸に既存手法を深化させる�
 - 工程内汎化 vs 工程横断汎化（Si ↔ 化合物）
 - フィードバック 1 件あたりの改善量
 - **SSL 特徴抽出器比較**：DINOv3（主軸）vs ImageNet 教師あり CNN vs
-  DINO / DINOv2 vs DINO + MAE vs C-RADIOv2
+  DINO / DINOv2（バックボーン切替。DINO+MAE・C-RADIOv2 は将来検討）
 
 ### 計算資源検証
 
@@ -135,6 +137,7 @@ PatchCore の蒸留による軽量化を主軸に既存手法を深化させる�
   ＋ bootstrap 信頼区間 (Confidence Interval, CI)
 - **DINOv2 等のライセンス**：早期に法務確認
 - **LLM JSON 化の逸脱**：構造化出力 + スキーマ検証、失敗時の監査ログ
-- **事前学習ドメインギャップ**：MAE のドメイン適応／産業横断モデル（C-RADIOv2 等）を検討
+- **事前学習ドメインギャップ**：HITL・補正レイヤでの吸収を第一とし、産業横断モデル
+  （C-RADIOv2 等）を将来検討。MAE のドメイン適応は将来検討
 - **撮像条件変動が欠陥より支配的**：ドメイン単位の分布推定・複数プロトタイプによる代表づけ
 - **DGX Spark 到着遅延**：PC GPU で走る縮約設定を事前用意

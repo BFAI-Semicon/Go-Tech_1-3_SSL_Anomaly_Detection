@@ -28,9 +28,10 @@ HITL 回復量を定量化する評価基盤が必要（researches.md §5、§7�
   ppm／DPPM で示せる（researches.md §7）。
 - **閾値・モデル選定**: FN／FP のコスト非対称性に基づくコスト感度分析で運用点とモデルを
   確定できる（researches.md §7）。
-- **比較実験**: 特徴抽出器比較（DINOv3 主軸 vs ImageNet 教師あり CNN・DINOv2・DINO＋MAE・
-  C-RADIOv2）、段階的ドメインシフト（同一工程→類似→異材料→異装置→異撮像）の劣化曲線、
-  HITL プロトタイプ N 件追加による回復量を測定できる（researches.md §5、§7）。
+- **比較実験**: 特徴抽出器比較（DINOv3 主軸 vs ImageNet 教師あり CNN・DINOv2・DINO。
+  バックボーン切替で実施。DINO＋MAE・C-RADIOv2 は将来検討）、段階的ドメインシフト
+  （同一工程→類似→異材料→異装置→異撮像）の劣化曲線、HITL プロトタイプ N 件追加による
+  回復量を測定できる（researches.md §5、§7）。
 
 ## Approach
 

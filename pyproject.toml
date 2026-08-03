@@ -11,10 +11,13 @@ dependencies = [
     # --- 異常検知フレームワーク ---
     # DGX Spark は CUDA 13 / Blackwell(sm_121) なので cu130 extra を使用
     # (torch>=2.9 / torchvision>=0.24 / torchcodec>=0.9 を引き込む)。
-    # DINOv3 バックボーンの timm 経由 drop-in 対応は anomalib 本体の GitHub main
-    # ブランチに統合済み。リリース版（2.6.0 想定）が PyPI 公開されるまでは
-    # 下の [tool.uv.sources].anomalib で本家 main ブランチを使用する。
-    "anomalib[cu130]",
+    # DINOv3 は anomalib>=2.5.1 の TimmFeatureExtractor（output_fmt="NLC"）経由で利用。
+    # 本プロジェクトでは特徴抽出のみ使用し、ストア・スコア化は自前で持つ。
+    "anomalib[cu130]>=2.6,<3",
+    # torch 系は [tool.uv.sources] で pytorch-cu130 index から取得するため直接依存にする。
+    "torch>=2.9",
+    "torchvision>=0.24",
+    "torchcodec>=0.9",
 
     # --- 特徴抽出バックボーン (ssl-vit-feature-extraction) ---
     "timm>=1.0.20",            # vit_*_patch16_dinov3 対応は timm 1.0.20 以降
@@ -69,13 +72,6 @@ explicit = true            # tool.uv.sources で明示指定した package の�
 torch = { index = "pytorch-cu130" }
 torchvision = { index = "pytorch-cu130" }
 torchcodec = { index = "pytorch-cu130" }
-# 【暫定】DINOv3 対応は本家 open-edge-platform/anomalib の GitHub main ブランチに
-# 統合済みだが、対応するリリース版（2.6.0 想定）はまだ PyPI 未公開のため、
-# 本家リポジトリの main ブランチを参照する。
-# リリース版が PyPI 公開されたら、この行を削除し、上の依存を
-#   "anomalib[cu130]>=2.6,<3"
-# に固定すること。ブランチ HEAD は uv.lock で特定コミットに固定される。
-anomalib = { git = "https://github.com/open-edge-platform/anomalib.git", branch = "main" }
 
 [tool.ruff]
 line-length = 100

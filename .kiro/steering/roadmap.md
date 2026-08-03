@@ -32,19 +32,19 @@ FAISS ベースの特徴量ストア、HITL（ROI 注釈＋自然言語コメン
   - PatchCore 蒸留・既存手法ベース整備（`docs/plan.md` 前半の別テーマ。researches.md には
     含まれないため本 roadmap の対象外）
   - ViT の重み更新・SSL 事前学習の実施（researches.md §3.1 で禁止）
-  - anomalib 本体の改修（DINOv3 対応は upstream の GitHub main ブランチに統合済み。
-    リリース版（2.6.0 想定）が PyPI 公開されるまでは `pyproject.toml` で本家 main
-    ブランチを暫定参照）
+  - MAE 再構成経路の実装（将来検討。researches.md §3.3）
+  - anomalib 本体の改修（DINOv3 は anomalib>=2.5.1 の TimmFeatureExtractor で利用可能。
+    依存は PyPI の `anomalib[cu130]>=2.6,<3`）
 
 ## Constraints
 
 - Python 3.12 固定。DGX Spark 向け torch cu130 aarch64 wheel が cp312 で提供されるため
   （`pyproject.toml` 6-8行目）。
 - 実行環境は NVIDIA DGX Spark（aarch64 / GB10 Grace Blackwell / CUDA 13）。torch は
-  cu130 index から取得（`pyproject.toml` 59-69行目）。
-- anomalib はリリース版（2.6.0 想定）の PyPI 公開まで本家（open-edge-platform/anomalib）の
-  GitHub main ブランチを暫定使用（DINOv3 対応は main に統合済み。`pyproject.toml` 70-75行目）。
-- FAISS は aarch64 のため CPU 版（`faiss-cpu`）を使用（`pyproject.toml` 22-25行目）。
+  cu130 index から取得（`pyproject.toml`）。
+- anomalib は PyPI の `anomalib[cu130]>=2.6,<3` を使用（DINOv3 は TimmFeatureExtractor 経由。
+  特徴抽出のみ利用し、ストア・スコア化は自前）。
+- FAISS は aarch64 のため CPU 版（`faiss-cpu`）を使用（`pyproject.toml`）。
 - DINOv2 等のモデルライセンスは早期に法務確認が必要（`docs/plan.md` リスクと対策）。
 - 各 spec で使うライブラリは `docs/library-adoption-proposal.md` の採用提案に従う。
 - メモリバンクの版管理は、bank 版管理の着手前（`docs/incremental-development-plan.md`
@@ -61,8 +61,8 @@ FAISS ベースの特徴量ストア、HITL（ROI 注釈＋自然言語コメン
 - **Shared seams to watch**:
   - パッチ特徴のテンソル形状・位置/ドメインメタデータ
     （ssl-vit-feature-extraction ↔ patch-feature-store ↔ primary-anomaly-detection）
-  - MAE 再構成経路の出力（再構成誤差の算出は primary-anomaly-detection が所有）
-    （ssl-vit-feature-extraction ↔ primary-anomaly-detection）
+  - バックボーン同一性（モデル名・重みリビジョン・前処理条件・埋め込み次元）
+    （ssl-vit-feature-extraction ↔ patch-feature-store ↔ promptable-correction-layer）
   - ストアのレコードスキーマ（vit_embedding・annotation・構造化 JSON・適用メタ情報）
     （patch-feature-store ↔ promptable-correction-layer）
   - 検証済みプロトタイプ・正常特徴の登録トリガー（検証は llm-feedback-structuring、
@@ -78,9 +78,9 @@ FAISS ベースの特徴量ストア、HITL（ROI 注釈＋自然言語コメン
 
 ## Specs (dependency order)
 
-- [ ] ssl-vit-feature-extraction -- タイル化・パッチ化と固定 SSL ViT（DINOv3 主軸）によるパッチ特徴抽出. Dependencies: none
+- [ ] ssl-vit-feature-extraction -- タイル化・パッチ化と固定 SSL ViT（DINOv3 主軸。anomalib TimmFeatureExtractor）によるパッチ特徴抽出. Dependencies: none
 - [ ] patch-feature-store -- FAISS kNN インデックス＋ドメイン分割・coreset・増分追加を備えた特徴量ストア. Dependencies: ssl-vit-feature-extraction
-- [ ] primary-anomaly-detection -- Mahalanobis／kNN 距離／MAE 再構成誤差の融合による異常スコア化・ヒートマップ・ROI 候補抽出. Dependencies: ssl-vit-feature-extraction, patch-feature-store
+- [ ] primary-anomaly-detection -- Mahalanobis／kNN 距離の融合による異常スコア化・ヒートマップ・ROI 候補抽出. Dependencies: ssl-vit-feature-extraction, patch-feature-store
 - [ ] llm-feedback-structuring -- ROI 注釈＋自然言語コメントの受付と、LLM による運用スキーマ JSON 化・スキーマ検証・監査ログ. Dependencies: primary-anomaly-detection
 - [ ] promptable-correction-layer -- roi_embedding とプロトタイプの近傍照合＋適用条件マッチによるスコア再構成と最終判定. Dependencies: ssl-vit-feature-extraction, patch-feature-store, primary-anomaly-detection, llm-feedback-structuring
 - [ ] evaluation-framework -- 多指標評価（image-level／AUPRO／合成異常／運用 KPI）と特徴抽出器比較・劣化曲線の評価基盤. Dependencies: ssl-vit-feature-extraction, patch-feature-store, primary-anomaly-detection

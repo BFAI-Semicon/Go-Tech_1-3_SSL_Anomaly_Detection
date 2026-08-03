@@ -37,9 +37,8 @@
 ## 12. 環境・依存の前提（参考）
 
 - Python 3.12 固定。torch は cu130 index（x86-64 / aarch64 いずれも cp312 wheel 提供）。
-- anomalib は DINOv3 対応（本家 main に統合済み）を含むリリース版（2.6.0 想定）が
-  PyPI 公開されるまで、本家 main ブランチを暫定使用
-  （`pyproject.toml` `[tool.uv.sources].anomalib`）。
+- anomalib は PyPI の `anomalib[cu130]>=2.6,<3`（DINOv3 は `TimmFeatureExtractor` 経由。
+  特徴抽出のみ利用）。
 - FAISS は aarch64 のため `faiss-cpu`。
 - torch/anomalib を環境間で同一バージョンに揃え、デバイス非依存に実装すればソースは共通。
 
