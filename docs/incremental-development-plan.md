@@ -31,7 +31,7 @@
 
 - 固定パス 1 ファイルのドメイン JSON をロード → 一次判定（kNN スコア＋固定閾値）→
   補正 1 レコード適用（`OverrideNegative` × `LabelOverride` のみ）→ 最終判定（NG／許容）を返す。
-- `match` は `prototype_ids` ＋ `similarity_threshold` のみ。`scope`・specificity・競合解決・
+- `match` は `prototype_ids` ＋ `similarity_threshold` のみ。specificity・競合解決・
   マニフェスト・オントロジーは**すべて無し**。
 - **確認**: 「一次で Positive のパッチが、登録済みプロトタイプに近ければ許容に反転する」テストが通る。
   補正レイヤの価値（過検出抑制）が最初に目に見える。
@@ -41,7 +41,7 @@
 - pydantic でレコード全フィールド（`element_id` / `action` / `method` / `params` / `match` /
   `recorded_at` / `attributed_to` / `source_ref`）をモデル化し、4 action × 3 method＋`null` を実装。
 - jsonschema による構造検証（§11 の 1 段目のみ。CURIE 実在検証は Phase 7 へ）。
-- `match.scope` は**文字列の完全一致**だけで照合（CURIE は不透明文字列扱い）。
+- ドメイン軸の CURIE は**不透明文字列扱い**（文字列の完全一致だけで照合）。
 - §13 の「`params` の持ち方」「`similarity_threshold` の距離尺度」をここで確定する（実装がブロックされるため）。
 - **確認**: 4 action それぞれの一次→二次変換、不正 JSON の reject。
 

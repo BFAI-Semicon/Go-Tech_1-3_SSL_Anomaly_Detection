@@ -4,17 +4,16 @@
 
 ## 5. SemiKong オントロジー整合
 
-参照方式は **CURIE 参照（軽量）**。採用するのは **5 パースペクティブ**：
-Process / Materials / Equipment / Measurements / Units-of-work。
+参照方式は **CURIE 参照（軽量）**。採用するのは **4 パースペクティブ**：
+Process / Materials / Equipment / Units-of-work（Measurements は `match.scope` の廃止（§6.3）に伴い
+採用対象から外した。必要になればドメイン軸の追加として再検討する）。
 
-| フィールド                 | SemiKong モジュール               | 値の例（CURIE）                       |
-| -------------------------- | --------------------------------- | ------------------------------------- |
-| `domain.process`           | `05-foundry-idm/.../etching`      | `semicont:DeepReactiveIonEtchProcess` |
-| `domain.material`          | `08-materials`                    | `semicont:SiliconNitride`             |
-| `domain.equipment`         | `07-wfe/etch`                     | `semicont:PlasmaEtchSystem`           |
-| `domain.unit_of_work`      | Units of work                     | `semicont:Wafer`                      |
-| `match.scope.measurement`  | Measurements and quality          | `semicont:CriticalDimension`          |
-| `match.scope.defect_class` | quality（語彙が薄いため自社拡張） | `proj:PolymerResidue`                 |
+| フィールド            | SemiKong モジュール          | 値の例（CURIE）                       |
+| --------------------- | ---------------------------- | ------------------------------------- |
+| `domain.process`      | `05-foundry-idm/.../etching` | `semicont:DeepReactiveIonEtchProcess` |
+| `domain.material`     | `08-materials`               | `semicont:SiliconNitride`             |
+| `domain.equipment`    | `07-wfe/etch`                | `semicont:PlasmaEtchSystem`           |
+| `domain.unit_of_work` | Units of work                | `semicont:Wafer`                      |
 
 - 値を自由文字列でなく CURIE 参照にすることで、統制語彙からの補完・表記ゆれ防止・機械検証が得られる。
 - レコードで使う語彙は **`semicont`（SemiKong・上流）と `proj`（自社拡張）の 2 つ**で、更新契機が独立する
@@ -27,7 +26,8 @@ Process / Materials / Equipment / Measurements / Units-of-work。
   「グローバルレジストリ」に一元管理する**（§5.2）。ドメインファイルは定義を複製せず版キーだけを持つ。
 - **`domain_source_ontology_version` の意味**：ドメインの active／候補オントロジー版ではなく、作成時の domain
   CURIE タプルを解釈するための不変な版。要素の版とは独立しており、後から新しい版の要素が追加されても更新しない。
-- 欠陥タイプ分類は SemiKong では手薄なため、自社名前空間 `proj:` で拡張する。
+- 欠陥タイプ分類は SemiKong では手薄なため、自社名前空間 `proj:` で拡張する（`match.scope` の廃止後は
+  監査ログ・注釈側（llm-feedback-structuring）で使う語彙であり、ドメイン版アーティファクトには現れない）。
 - ライセンス/法務確認が必要（SemiKong はコードが MIT だが、オントロジー資産は上流ライセンス/条件を
   持ちうる）。正確な IRI は実際の `ontology.ttl` から取り込む。
 
@@ -44,14 +44,12 @@ Process / Materials / Equipment / Measurements / Units-of-work。
   remap 表はドメインごとに散らばらず、`1.2.0 → 1.3.0` の 1 箇所で管理する（`semicont` 由来・`proj` 由来を同枠で）。
 - 必要なら影響ルールを新 CURIE で再表明（要素を差し替え）し、その要素に新 `ontology_version` を刻む。
 - **`domain_id` は凍結**（§4.1）。domain CURIE を remap しても再計算せず、ドメイン同一性・アーティファクト連続性を保つ。
-- **ドメイン版アーティファクトは目標オントロジー版に正規化して生成**する。`domain_source_ontology_version`
-  から、各要素の `match.scope` は要素の版から、それぞれレジストリの remap を適用し、`match.scope` は目標版へ
-  正規化して格納する。作成時版・採用要素の authored 版・目標版ごとの domain 表現を
+- **ドメイン版アーティファクトは目標オントロジー版に正規化して生成**する。domain CURIE タプルに
+  `domain_source_ontology_version` からレジストリの remap を適用し、作成時版・目標版ごとの domain 表現を
   `domain_representations_by_ontology_version` に格納し、正規化先を `target_ontology_version` で示す。
-  稼働系の判定には目標版に対応する domain と正規化済み要素だけを使う。要素の authored 版は要素単位の
-  `ontology_version` タグで判別し、**正規化前の元 CURIE は独立監査ログ（`source_ref` 先）が保持**する
-  （スナップショットは稼働系向けの正規化値に一本化し、原本は監査ログに委譲する）。次の目標版へ上げる際は、
-  格納済みの正規化値にレジストリの remap を前方適用して再生成する。
+  稼働系の判定には目標版に対応する domain 表現だけを使う（`match.scope` の廃止（§6.3）により、
+  要素側に正規化対象の CURIE はない）。次の目標版へ上げる際は、格納済みの正規化値にレジストリの
+  remap を前方適用して再生成する。
 - **昇格は評価ゲートを通す**。オントロジー変更の種類で判定への影響が異なるため、`evaluation-framework`
   で escape/overkill の回帰を確認してから promote する。ドメイン単位で段階的に上げてよい。
 

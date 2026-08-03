@@ -48,10 +48,11 @@
 
 計画のフェーズ構成が、逆転すべき境界を正確に示している。
 
-### 1. scope 照合（decision ← ontology）
+### 1. ドメイン軸照合（decision ← ontology）
 
-Phase 2 では scope を「文字列の完全一致」で照合し、Phase 7 で
-「上位クラス CURIE 階層マッチ」に拡張する。つまり decision 側は `ScopeMatcher` の
+Phase 2–3 ではドメイン軸を「文字列の完全一致＋`any` ワイルドカード」で照合し、Phase 7 で
+「上位クラス CURIE 階層マッチ」（§4.2／§9.1）に拡張する（旧 `match.scope` は廃止済みで、
+照合対象はドメイン軸のみ）。つまり decision 側は `AxisMatcher` の
 ようなプロトコル（抽象）を定義し、
 
 - Phase 2–3: 完全一致＋ `any` ワイルドカードの実装（decision 内蔵でよい）

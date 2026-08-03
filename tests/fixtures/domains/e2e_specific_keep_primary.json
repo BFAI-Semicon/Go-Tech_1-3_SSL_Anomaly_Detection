@@ -1,0 +1,20 @@
+{
+  "domain": {
+    "process": "semicont:DeepReactiveIonEtchProcess",
+    "material": "semicont:Silicon",
+    "equipment": "semicont:Etcher",
+    "unit_of_work": "semicont:Wafer"
+  },
+  "elements": [
+    {
+      "element_id": 302,
+      "action": "KeepPrimary",
+      "method": null,
+      "params": {},
+      "match": {},
+      "recorded_at": "2026-06-20T10:00:00Z",
+      "attributed_to": "op_e2e",
+      "source_ref": "annotation:ann-e2e-302"
+    }
+  ]
+}

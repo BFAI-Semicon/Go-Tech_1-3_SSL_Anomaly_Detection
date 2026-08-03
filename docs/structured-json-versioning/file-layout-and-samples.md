@@ -95,14 +95,14 @@ CURIE は、各要素の `ontology_version`、およびドメインファイル�
 - トップレベル（不変メタ＋正規化情報）:
   - `domain_id`（凍結。§4.1）、`domain_version`（ドメイン内単調増加。§4）
   - `domain_source_ontology_version`（domain CURIE タプルの解釈元＝作成時版。§5.1）
-  - `target_ontology_version`（稼働系が使う正規化先。要素 `match.scope` もこの版へ正規化済み。§5.1）
+  - `target_ontology_version`（稼働系が使う正規化先。§5.1）
   - `domain_representations_by_ontology_version`（同一 domain の新旧表現を版キーで格納。作成時版・採用要素の
     authored 版・目標版を含む。3 版以上でも同じマップに追加）
   - `built_against_bank_snapshot_id`（ビルド時に `match.prototype_ids` が解決できたメモリバンク版。bank 互換の
     祖先判定の到達目標。§4）
 - `elements[]`（有効要素集合そのもの。削除済み要素は含まない。§9）:
   - `element_id`（全ドメイン一意・非再利用。§6.3）、`ontology_version`（要素の authored 版タグ。§6.3）
-  - `action` / `method` / `params` / `match`（`match.scope` は目標版へ正規化済み）
+  - `action` / `method` / `params` / `match`
   - `recorded_at` / `attributed_to` / `source_ref`
 
 ```json
@@ -133,7 +133,7 @@ CURIE は、各要素の `ontology_version`、およびドメインファイル�
       "action": "OverridePositive",
       "method": "LabelOverride",
       "params": {},
-      "match": { "prototype_ids": [2041], "similarity_threshold": 0.90, "scope": { "defect_class": "proj:MicroCrack" } },
+      "match": { "prototype_ids": [2041], "similarity_threshold": 0.90 },
       "recorded_at": "2026-06-20T10:00:00Z",
       "attributed_to": "op_tanaka",
       "source_ref": "annotation:ann-5700"
@@ -146,8 +146,8 @@ CURIE は、各要素の `ontology_version`、およびドメインファイル�
   ドメイン合成に使う。
 - 稼働・ロールバック時に `ontology_registry.json` を引かない（正規化済みで自己完結）。次の目標版へ上げる際は、
   格納済みの正規化値にレジストリの remap を前方適用して再生成する。
-- 要素の authored 版は `ontology_version` タグで判別する（同一 IRI の意味変更は値では区別できないため。§5.1）。
-  正規化前の元 CURIE は独立監査ログ（`source_ref` 先）が保持する（§5.1）。
+- 要素の authored 版は `ontology_version` タグで判別する（同一 IRI の意味変更は値では区別できないため。§5.1。
+  `match.scope` の廃止により要素が CURIE を持たなくなったため、要素単位タグの要否は §13 で再検討）。
 
 ### 8.2 要素の作成・編集・削除（可変・最小構成）
 

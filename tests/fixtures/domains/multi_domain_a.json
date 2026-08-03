@@ -1,0 +1,23 @@
+{
+  "domain": {
+    "process": "semicont:DeepReactiveIonEtchProcess",
+    "material": "semicont:Silicon",
+    "equipment": "any",
+    "unit_of_work": "semicont:Wafer"
+  },
+  "elements": [
+    {
+      "element_id": 101,
+      "action": "OverrideNegative",
+      "method": "LabelOverride",
+      "params": {},
+      "match": {
+        "prototype_ids": [10],
+        "similarity_threshold": 0.85
+      },
+      "recorded_at": "2026-05-01T08:00:00Z",
+      "attributed_to": "op_a",
+      "source_ref": "annotation:ann-a-101"
+    }
+  ]
+}
