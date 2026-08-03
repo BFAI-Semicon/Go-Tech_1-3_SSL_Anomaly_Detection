@@ -9,7 +9,7 @@ roadmap の依存順（ssl-vit → store → primary → llm → correction → 
 
 実施が完了した項目にチェックを付ける。
 
-1. [ ] **promptable-correction-layer（前半）**（開発計画 Phase 0–3 の範囲に限定）
+1. [x] **promptable-correction-layer（前半）**（開発計画 Phase 0–3 の範囲に限定）
 2. [ ] **ssl-vit-feature-extraction**
 3. [ ] **patch-feature-store**（着手前に Lance / LanceDB スパイク判断）
 4. [ ] **primary-anomaly-detection**
