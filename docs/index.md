@@ -1,0 +1,42 @@
+# docs 索引
+
+`docs/` 配下の Markdown を、リポジトリへの追加日（git 初回追加）の降順で列挙する。
+
+- 2026-07-30
+  - [abnormal-prototype-anomaly-detection.md](./abnormal-prototype-anomaly-detection.md)
+    - 異常プロトタイプ／異常メモリバンクを使う研究調査
+- 2026-07-28
+  - [package-dependency-direction.md](./package-dependency-direction.md)
+    - `src/` パッケージ間の依存方向（clean architecture）設計メモ
+  - [semikong-ontology-coverage.md](./semikong-ontology-coverage.md)
+    - SemiKong オントロジーの工程網羅性調査
+  - [arim-ontology-usability.md](./arim-ontology-usability.md)
+    - ARIM メタデータ語彙の本開発での利用可能性調査
+  - [spec-execution-order.md](./spec-execution-order.md)
+    - takt-sdd で進める spec の推奨実行順と完了チェック
+- 2026-07-27
+  - [2026_progress.md](./2026_progress.md)
+    - 令和 8 年度の課題別進捗（作業済・作業中・未作業）
+- 2026-07-23
+  - [incremental-development-plan.md](./incremental-development-plan.md)
+    - 補正レイヤ等の段階的開発計画（Phase 0–8）
+  - [library-adoption-proposal.md](./library-adoption-proposal.md)
+    - 実装で採用するライブラリの調査・提案
+- 2026-07-09
+  - [structured-json-versioning-design.md](./structured-json-versioning-design.md)
+    - 構造化 JSON 設計メモの分割案内（実体は `structured-json-versioning/`）
+- 2026-07-02
+  - [2025-2026_survey.md](./2025-2026_survey.md)
+    - 異常検知ベンチマーク（MVTec AD 2 等）の 2025–2026 動向調査
+  - [dino_mae.md](./dino_mae.md)
+    - DINO / MAE の自己教師あり学習手法の解説（ViT・半導体 SEM / VAD との相性）
+  - [milestones.md](./milestones.md)
+    - 開発マイルストーンと各段階の達成目標・成果物
+  - [official.md](./official.md)
+    - 研究開発内容等説明書（計画名・概要・背景の公式説明）
+  - [plan.md](./plan.md)
+    - 2026 年度研究計画（PatchCore 蒸留と SSL 特徴による欠陥検出）
+  - [researches.md](./researches.md)
+    - Promptable Patch Retrieval の研究概要書（工程横断ゼロショット欠陥検出）
+  - [procedure_takt-sdd.md](./procedure_takt-sdd.md)
+    - takt-sdd による仕様駆動開発の手順
