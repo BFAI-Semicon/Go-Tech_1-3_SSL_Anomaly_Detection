@@ -83,8 +83,13 @@
 - **目的**：一次検出の動作確立と特徴抽出器の優劣を定量化
 - **主タスク**：
   - 埋め込み逸脱（Mahalanobis ＋ PatchCore系 kNN on DINOv3）
+  - VisA での通し実行（メモリバンク構築→一次検出→image-level AUROC／AUPRO）で配線を確認
+    （[VisA 検証ゲート](./visa-validation-gate.md)）
+  - 独自の実機画像（正常のみ）で過検出率・スコア安定性・汚染候補を確認
+    （[正常のみ検証プラン](./normal-only-validation-plan.md)）
   - 特徴抽出器比較（DINOv3主軸 vs ImageNet教師ありCNN vs DINO/DINOv2。バックボーン切替）
-  - 工程内汎化 vs 工程横断（Si↔化合物）の劣化曲線を取得
+  - 工程内汎化 vs 工程横断（Si↔化合物）の劣化曲線を取得（正常のみデータでは
+    ドメイン別グループ分割の過検出率増分で描く）
 - **主な狙い**：一次検出ベンチ、特徴抽出器比較レポート、汎化劣化曲線
 
 ### 3. HITL（ROI＋言語）＋補正レイヤ

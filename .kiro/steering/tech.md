@@ -25,13 +25,15 @@
 
 ## Key Libraries（パターンに効くものだけ）
 
-| 領域                       | 採用の型                                                       |
-| -------------------------- | -------------------------------------------------------------- |
-| 特徴抽出・異常検知枠       | anomalib `TimmFeatureExtractor` + timm（DINOv3）。抽出のみ利用 |
-| 近傍探索                   | FAISS Flat（CPU）。版管理着手前に Lance／LanceDB スパイク予定  |
-| ドメイン定義・補正レコード | pydantic モデルが権威。JSON Schema は派生                      |
-| 性質テスト・依存検査       | hypothesis、import-linter                                      |
-| ライブラリ選定の詳細       | `docs/library-adoption-proposal.md` に従う                     |
+| 領域                       | 採用の型                                                          |
+| -------------------------- | ----------------------------------------------------------------- |
+| 特徴抽出                   | anomalib `TimmFeatureExtractor` + timm（DINOv3）                  |
+| データ読み込み             | anomalib `anomalib.data`（VisA／Folder／Tabular）をアダプタで包む |
+| 評価メトリクス             | anomalib／torchmetrics／scikit-learn を呼ぶ。自作しない           |
+| 近傍探索                   | FAISS Flat（CPU）。版管理着手前に Lance／LanceDB スパイク予定     |
+| ドメイン定義・補正レコード | pydantic モデルが権威。JSON Schema は派生                         |
+| 性質テスト・依存検査       | hypothesis、import-linter                                         |
+| ライブラリ選定の詳細       | `docs/library-adoption-proposal.md` に従う                        |
 
 ## Development Standards
 
@@ -77,7 +79,13 @@ mise run lint-md
 - **重み固定・推論時適応** — ViT を更新せず、メモリバンク／プロトタイプ／適用条件で適応する
 - **特徴抽出器は Protocol で切替** — 実装は DINOv3（anomalib `TimmFeatureExtractor`）。
   比較用 DINOv2／DINO／ImageNet CNN はバックボーン名の設定切替。MAE は将来検討
-- **anomalib は特徴抽出のみ** — ストア・スコア化・coreset は自前。依存は PyPI `>=2.6,<3`
+- **anomalib は特徴抽出・データ読み込み・指標** — ストア・スコア化は自前。依存は PyPI `>=2.6,<3`。
+  anomalib の型はアダプタで受けて下流に漏らさない
+- **公開データセットは VisA** — CC BY 4.0（商用可）。CC BY-NC-SA 4.0 の MVTec AD は使わない。
+  spec 4 の完了条件は VisA 検証ゲート（`docs/visa-validation-gate.md`）
+- **正常のみの実機データでは AUROC 系を使わない** — 過検出率・安定性・ドメインシフト影響量で
+  評価する。分割は複数バンク＋共通評価集合、グループキーはウェハ／ロット／撮像日
+  （`docs/normal-only-validation-plan.md`）
 - **FAISS は CPU** — aarch64 で公式 GPU wheel が無い。必要なら後でソースビルド／cuVS を検討
 - **LLM ランタイムはコンテナ側** — アプリ依存は OpenAI 互換／Ollama クライアントに閉じる
 - **仕様駆動** — 機能は `.kiro/specs/{feature}/` で requirements→design→tasks→impl。

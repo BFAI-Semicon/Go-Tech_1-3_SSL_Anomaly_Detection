@@ -12,7 +12,8 @@ dependencies = [
     # DGX Spark は CUDA 13 / Blackwell(sm_121) なので cu130 extra を使用
     # (torch>=2.9 / torchvision>=0.24 / torchcodec>=0.9 を引き込む)。
     # DINOv3 は anomalib>=2.5.1 の TimmFeatureExtractor（output_fmt="NLC"）経由で利用。
-    # 本プロジェクトでは特徴抽出のみ使用し、ストア・スコア化は自前で持つ。
+    # 利用範囲は特徴抽出・データ読み込み(anomalib.data)・評価メトリクスで、
+    # ストア・スコア化は自前で持つ。
     "anomalib[cu130]>=2.6,<3",
     # torch 系は [tool.uv.sources] で pytorch-cu130 index から取得するため直接依存にする。
     "torch>=2.9",

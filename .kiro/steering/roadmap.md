@@ -43,7 +43,9 @@ FAISS ベースの特徴量ストア、HITL（ROI 注釈＋自然言語コメン
 - 実行環境は NVIDIA DGX Spark（aarch64 / GB10 Grace Blackwell / CUDA 13）。torch は
   cu130 index から取得（`pyproject.toml`）。
 - anomalib は PyPI の `anomalib[cu130]>=2.6,<3` を使用（DINOv3 は TimmFeatureExtractor 経由。
-  特徴抽出のみ利用し、ストア・スコア化は自前）。
+  利用範囲は特徴抽出・データ読み込み・評価メトリクスで、ストア・スコア化は自前）。
+- 公開データセットは VisA（CC BY 4.0、商用可）を使う。MVTec AD は CC BY-NC-SA 4.0 で
+  商用不可のため使わない（`docs/visa-validation-gate.md`）。
 - FAISS は aarch64 のため CPU 版（`faiss-cpu`）を使用（`pyproject.toml`）。
 - DINOv2 等のモデルライセンスは早期に法務確認が必要（`docs/plan.md` リスクと対策）。
 - 各 spec で使うライブラリは `docs/library-adoption-proposal.md` の採用提案に従う。
@@ -59,6 +61,12 @@ FAISS ベースの特徴量ストア、HITL（ROI 注釈＋自然言語コメン
   独立に requirements→design→tasks へ進められ、依存は特徴テンソル・ストアレコード・
   構造化 JSON という明示的なデータ契約のみになる。
 - **Shared seams to watch**:
+  - データセット入力（画像・split・GT マスク）。読み込みは ssl-vit-feature-extraction の
+    入力アダプタが所有し、anomalib の型を下流に漏らさない
+    （ssl-vit-feature-extraction ↔ primary-anomaly-detection ↔ evaluation-framework）
+  - 検証ゲート用に前倒しする image-level AUROC・AUPRO。実装は evaluation-framework が所有し、
+    呼び出しは合成ルート（CLI）に限る。依存順序上は seam として扱い循環依存にしない
+    （evaluation-framework ↔ primary-anomaly-detection）
   - パッチ特徴のテンソル形状・位置/ドメインメタデータ
     （ssl-vit-feature-extraction ↔ patch-feature-store ↔ primary-anomaly-detection）
   - バックボーン同一性（モデル名・重みリビジョン・前処理条件・埋め込み次元）
@@ -78,12 +86,19 @@ FAISS ベースの特徴量ストア、HITL（ROI 注釈＋自然言語コメン
 
 ## Specs (dependency order)
 
-- [ ] ssl-vit-feature-extraction -- タイル化・パッチ化と固定 SSL ViT（DINOv3 主軸。anomalib TimmFeatureExtractor）によるパッチ特徴抽出. Dependencies: none
+- [ ] ssl-vit-feature-extraction -- データセット入力アダプタ、タイル化・パッチ化と固定 SSL ViT（DINOv3 主軸。anomalib TimmFeatureExtractor）によるパッチ特徴抽出. Dependencies: none
 - [ ] patch-feature-store -- FAISS kNN インデックス＋ドメイン分割・coreset・増分追加を備えた特徴量ストア. Dependencies: ssl-vit-feature-extraction
 - [ ] primary-anomaly-detection -- Mahalanobis／kNN 距離の融合による異常スコア化・ヒートマップ・ROI 候補抽出. Dependencies: ssl-vit-feature-extraction, patch-feature-store
+  - 完了条件に VisA 検証ゲート（メモリバンク構築 → 一次検出 → 最小指標の通し実行）を置く
+    （`docs/visa-validation-gate.md`）。
 - [ ] llm-feedback-structuring -- ROI 注釈＋自然言語コメントの受付と、LLM による運用スキーマ JSON 化・スキーマ検証・監査ログ. Dependencies: primary-anomaly-detection
 - [ ] promptable-correction-layer -- roi_embedding とプロトタイプの近傍照合＋適用条件マッチによるスコア再構成と最終判定. Dependencies: ssl-vit-feature-extraction, patch-feature-store, primary-anomaly-detection, llm-feedback-structuring
 - [ ] evaluation-framework -- 多指標評価（image-level／AUPRO／合成異常／運用 KPI）と特徴抽出器比較・劣化曲線の評価基盤. Dependencies: ssl-vit-feature-extraction, patch-feature-store, primary-anomaly-detection
   - promptable-correction-layer は依存に含めない。HITL 回復量・補正方式比較の実験実行は
     補正レイヤ完成後になるが、指標・プロトコル定義は独立に進められるため
     （`evaluation-framework/brief.md` Upstream / Downstream 参照）。
+  - VisA 検証ゲートが使う image-level AUROC・AUPRO のみ primary-anomaly-detection と
+    並行して前倒し実装する。
+  - 独自の実機画像は正常のみでラベル・画素マスクが無いため、AUROC 系ではなく過検出率・
+    スコア安定性・ドメインシフト影響量を測る専用プロトコルを持つ
+    （`docs/normal-only-validation-plan.md`）。

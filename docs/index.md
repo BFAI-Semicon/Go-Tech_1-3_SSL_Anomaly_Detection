@@ -2,6 +2,11 @@
 
 `docs/` 配下の Markdown を、リポジトリへの追加日（git 初回追加）の降順で列挙する。
 
+- 2026-08-10
+  - [normal-only-validation-plan.md](./normal-only-validation-plan.md)
+    - 正常のみの実機画像で過検出率・安定性・ドメインシフト影響量を測る検証プラン
+  - [visa-validation-gate.md](./visa-validation-gate.md)
+    - spec 4 完了時点で VisA を通しで動かす検証ゲート（合格条件・CLI・既知の落とし穴）
 - 2026-07-30
   - [abnormal-prototype-anomaly-detection.md](./abnormal-prototype-anomaly-detection.md)
     - 異常プロトタイプ／異常メモリバンクを使う研究調査
