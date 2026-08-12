@@ -10,7 +10,7 @@
   - CUDA 上ではバッチ内のタイル数が変わると出力がビット単位で変化する（最大差 5e-3）。`torch.use_deterministic_algorithms(True)` でも解消しない。バッチサイズを固定すればプロセスをまたいで再現する。
   - anomalib の `ImageBatch.collate` は形状混在時に「最大辺を持つ 1 枚の形状」へ全件をリサイズし、アスペクト比を壊す。DataLoader を経由しない設計が必要。
   - anomalib に `Tiler` は存在するが、非公開 API・強いステートフル性・タイル座標を返さない・`stride=None` で例外という問題があり、本機能の要件を満たさない。
-  - `.venv` の `opencv-python-headless` が壊れており `import cv2` が失敗する。`anomalib.data` / `anomalib.models` が import できず、実装着手前の解消が必要。
+  - `.venv` の `opencv-python-headless` は `cv2/` が欠損して `import cv2` が失敗していたが、`uv sync --extra llm --reinstall-package opencv-python-headless` で復旧済みである。`anomalib.data` / `anomalib.models` は現在 import できる。
   - 重い依存を層に閉じ込める検査は `layers` 契約では行えず、`forbidden` 契約と session option `include_external_packages = true` が必要。実測で `correction_layer` に対する外部 forbidden 契約が期待どおり動作することを確認した。
 
 ## Research Log
@@ -40,7 +40,11 @@
   - モデル名を `hf-hub:<repo>@<revision>` 形式にするとリビジョンを固定できる（`hf_split` が `@` で分割）。固定版とタグ指定版の重みが一致することを実測で確認。
   - `pretrained_cfg` から `input_size` / `mean` / `std` / `interpolation` / `hf_hub_id` / `tag` / `license` が取得できる。
   - `.eupe_lvd1689m` タグは非商用研究限定ライセンス。`lvd1689m` タグは `dinov3-license`。
-- **Implications**: 重みリビジョンは「明示指定 → HF キャッシュのスナップショットパス → `None`」の順で解決でき、ネットワーク前提を持ち込まずに要件 6.4 を満たせる。既定バックボーンのタグ選択にはライセンス上の注意が必要（本 spec は選択肢を提供するのみで、採用判断は運用側）。
+  - `timm.get_pretrained_cfg` はレジストリ辞書 `_model_pretrained_cfgs` の引きだけで、ネットワークにも重みファイルにも触れない（`timm/models/_registry.py:326-336`）。したがって同関数の失敗は名前・タグの不正だけを表し、重みの取得失敗は表さない。
+  - 重みの取得は `timm.create_model(..., pretrained=True)` の内側で起きる。anomalib の `TimmFeatureExtractor` はこれを両経路で呼ぶ（`feature_extractors/timm.py:203-206`、`221-225`）。
+  - 重み取得の失敗形態は 2 系統に収まる。Hugging Face hub 由来はすべて `OSError` を継承する（huggingface_hub 1.23.0 の `__mro__` を実行して確認。`LocalEntryNotFoundError` → `FileNotFoundError` → `OSError`、`RepositoryNotFoundError` / `HfHubHTTPError` → `httpx.HTTPError` → `OSError`、`OfflineModeIsEnabled` → `ConnectionError` → `OSError`）。timm 側の「重みが存在しない」「指定パスがディレクトリでない」および `load_state_dict(strict=True)` の不一致は `RuntimeError`（`timm/models/_builder.py` の `load_pretrained`）。
+  - 実測: 空キャッシュ（`HF_HOME` を新規ディレクトリ）＋ `HF_HUB_OFFLINE=1` で `timm.create_model("vit_small_patch16_dinov3.lvd1689m", pretrained=True)` が `LocalEntryNotFoundError` を送出した。
+- **Implications**: 要件 3.4 の「重みを取得できない」を報告できるのは構築呼び出しの地点だけである。`load` はこの 1 呼び出しを `try` で囲み、`OSError` / `RuntimeError` を `BackboneUnavailableError` へ変換する必要がある。重みリビジョンは「明示指定 → HF キャッシュのスナップショットパス → `None`」の順で解決でき、ネットワーク前提を持ち込まずに要件 6.4 を満たせる。既定バックボーンのタグ選択にはライセンス上の注意が必要（本 spec は選択肢を提供するのみで、採用判断は運用側）。
 
 ### 推論の決定性（要件 3.3）
 
@@ -65,8 +69,17 @@
   - DataModule 単体ではリサイズが一切かからないことを実測（1200x800 と 1000x900 がそのまま返る）。
   - `ImageBatch.collate` は形状混在時、`argmax` で「最大の辺長を持つ 1 枚」の `(H, W)` を選び、全件をその形状へ `resize` する。パディングではない。256x256 と 512x512 と 300x900 を混ぜると全件が 300x900 になり、アスペクト比が壊れる。
   - `setup()` を呼ぶまで `train_data` / `test_data` 属性は存在しない。
+  - `setup()` は `_create_val_split()` を無条件に呼ぶ（`datamodules/base/image.py:159`）。`val_split_mode` の既定は DataModule ごとに異なり、`Folder` は `FROM_TEST` + `val_split_ratio=0.5`（`folder.py:134-136`）、`Visa` は `SAME_AS_TEST`（`visa.py:116-118`）。`FROM_TEST` は `test_data` を `random_split` の戻り値で再代入し、`SAME_AS_TEST` は `val_data` を `test_data` の deepcopy にする（`base/image.py:344-354`）。
+  - `random_split` の乱数は `torch.Generator().manual_seed(seed) if seed else None` で作られる（`data/utils/split.py:175`）。`seed=None` はグローバル RNG を使うため分割が実行ごとに変わり、`seed=0` も偽値のため未指定と同じ縮退になる。
+  - `ValSplitMode.NONE` では `_create_val_split` が何もせず、`val_data` は型注釈だけで代入されないため属性自体が存在しない（`base/image.py:126`、`363-364`）。
+  - task は `mask_path` が全件空かどうかで自動推論される（`datasets/image/folder.py:289`）。task が SEGMENTATION のとき、正常サンプルには全ゼロマスクが合成され、異常サンプルはマスクを読み込み、UNKNOWN は `None` のままになる（`datasets/base/image.py:274-281`）。`ImageItem` のフィールド検証が `[1, H, W]` を `[H, W]` へ squeeze し dtype を `torch.bool` へ正規化するため、受け取る側では常に `(H, W)` の bool になる（`data/validators/torch/image.py:196-207`）。
+  - 合成 Folder データセット（正常 6・異常 4・normal_test 3、`mask_dir` あり）での実測。既定（`FROM_TEST`・`ratio=0.5`・`seed=None`）では `test_data` が 7 件から 4 件へ減り、`val_data` が 3 件になり、2 回の生成で TEST の集合が一致しなかった。`ValSplitMode.NONE` を明示すると TEST は 7 件（ディレクトリ構成どおり）で 2 回一致し、`val_data` 属性は生成されなかった。`FROM_TRAIN` + `ratio=0.5` + `seed=1` では TRAIN 3 / VAL 3 / TEST 7 が 2 回とも一致した。
+  - `setup()` は `_create_test_split()` も無条件に呼ぶ（`datamodules/base/image.py:158`）。`test_split_mode` の既定は `Folder` / `Visa` ともに `FROM_DIR`・`test_split_ratio=0.2`（`folder.py:132-133`、`visa.py:114-115`）。`test_data.has_normal` が False のとき TRAIN を `random_split(test_split_ratio, seed=self.seed)` で分割して TEST に加える（`base/image.py:303-320`）。`seed` は DataModule に 1 つで VAL と共用である。
+  - `normal_test_dir` なし（正常 6・異常 4、`val_split_mode=NONE`）での実測。TRAIN が 5 件、TEST が 5 件になり、TEST へ移った正常画像は同一プロセス内の 3 回で `n0` / `n2` / `n2`、別プロセスの 3 回で `n3` / `n5` / `n1` と毎回変わった。
+  - `TestSplitMode.NONE` は `has_normal` が真のとき `split_by_label` が TEST を異常のみへ再代入したまま正常テスト画像を再結合しない。実測で TEST が 7 件から 4 件（正常 0 件）になった。`FROM_DIR` では 7 件が保たれ、2 回の生成で一致した。
+  - 同じ合成データセットでのマスクの実測。`mask_dir` あり構成は task=SEGMENTATION に推論され、正常画像が全 False の bool マスク、異常画像が非ゼロを含む bool マスクになった。`mask_dir` なし構成は task=CLASSIFICATION に推論され、正常・異常のいずれも `gt_mask` が `None` になった。
   - VisA は SHA256 検証付きで自動ダウンロードされる。anomalib の docstring はライセンスを CC BY-NC-SA 4.0 と書いているが、`docs/visa-validation-gate.md` は配布元根拠で CC BY 4.0（商用可）としており、法務判断は配布元を根拠にする方針である。
-- **Implications**: DataModule を「準備と分割」にだけ使い、DataLoader を使わず Dataset を直接反復する構成にすれば、collate の破壊的リサイズを構造的に回避でき、`batch_size=1` という運用上の約束に頼らずに済む。
+- **Implications**: DataModule を「準備と分割」にだけ使い、DataLoader を使わず Dataset を直接反復する構成にすれば、collate の破壊的リサイズを構造的に回避でき、`batch_size=1` という運用上の約束に頼らずに済む。ただし split とマスクの既定は入力元ごとに異なるため、境界のファクトリが明示値を渡して本機能側の契約に固定する必要がある。
 
 ### anomalib Tiler の採用可否
 
@@ -131,7 +144,7 @@
 - **Selected Approach**: 原点クランプ。
 - **Rationale**: パディング画素は実在しない内容であり、そこから生成されたパッチ特徴が正常メモリバンクに混入すると、下流の距離分布に人工的な偏りを持ち込む。クランプなら全パッチが実画素に対応する。
 - **Trade-offs**: 端部で重なりが設定値より大きくなり、同一領域のパッチが重複する。重複の排除は下流の責務として境界外に置いた。
-- **Follow-up**: 画像寸法がタイルサイズ未満の場合は被覆規則が定義できないため `ValueError` で拒否する。実データでこの条件が発生しないことを入力アダプタ側で確認する。
+- **Follow-up**: 画像寸法がタイルサイズ未満の場合は被覆規則が定義できないため `ValueError` で拒否する。検査の担当は `FeatureExtractionEngine`（`plan_tiles` 呼び出しでの fail-fast）に確定し、入力アダプタ側には置かない。入力アダプタはタイル化条件を受け取らず、寸法を理由に画像を棄却する責務も持たないためである（`design.md` の Engine 責務）。クローズ済み。
 
 ### Decision: 固定バッチサイズで推論し、端数をパディングする
 
@@ -143,7 +156,7 @@
 - **Selected Approach**: 3。
 - **Rationale**: 実測で、バッチサイズを固定すると別プロセス実行でもハッシュが一致した。スループットを犠牲にせずに要件を満たせる。
 - **Trade-offs**: 端数分の無駄な計算が生じる。`tile_batch_size` が出力の同一性に影響する条件になるため記録が必要になる。
-- **Follow-up**: `tile_batch_size` と `device` を `ExtractionRuntimeConfig` にまとめ、`ExtractionConditions.runtime` として記録する。デバイスをまたぐ一致は保証しないことを設計に明記する。
+- **Follow-up**: `tile_batch_size` と `device` を `ExtractionRuntimeConfig` にまとめ、`ExtractionConditions.runtime` として記録する。保証範囲は「同一デバイス・同一 `tile_batch_size`（別プロセスを含む）」とし、デバイスをまたぐ一致は保証しないことを設計の事後条件に明記した。クローズ済み。
 
 ### Decision: DataLoader を使わず anomalib の Dataset を直接反復する
 
@@ -156,6 +169,40 @@
 - **Rationale**: collate を構造的に経由しないため、設定ミスによる暗黙リサイズが起こり得ない。ダウンロードと split ロジックは DataModule から得られる。
 - **Trade-offs**: DataLoader のワーカー並列を使えない。1 画像単位の処理が主であり、律速はタイル推論側なので影響は小さい。
 - **Follow-up**: モデル側 `PreProcessor` を一切構成しないこと（構成すると `_update_augmentations` 経由で Resize が注入される）。
+
+### Decision: 検証 split を生成せず、`DatasetSplit` を TRAIN / TEST の 2 つに限る
+
+- **Context**: 要件 1.1 の split 区分。DataModule の `val_split_mode` 既定が入力元ごとに異なり、`setup()` が無条件に `_create_val_split()` を呼ぶため、既定に委ねると `images(TRAIN)` / `images(TEST)` の意味が入力元ごとに変わる。一方で要件 1 には VAL を生成する受入基準が無く、分割プロトコルの所有は `evaluation-framework` である（`docs/normal-only-validation-plan.md:185-186`）。
+- **Alternatives Considered**:
+  1. anomalib の既定に委ねる — `Folder` は `FROM_TEST` + `ratio=0.5` で `test_data` が半分に再代入され、しかも `seed=None` のため実行ごとに変わる。`Visa` は `SAME_AS_TEST` で VAL と TEST が同一集合になる。下流のリークなし評価分割が成立しない。
+  2. anomalib の `ValSplitMode` をそのまま設定値として露出する — 6 モードすべてを本機能の契約に含めることになり、`SYNTHETIC`（合成異常の生成）のように本機能が所有しない判断まで抱える。
+  3. 選択肢を `NONE` と `FROM_TRAIN` に絞った独自の設定型を境界で受け取る — `FROM_TRAIN` は「TRAIN をランダム分割して検証集合を作る」判断であり、TEST 側で境界外とした TRAIN サンプリングと同じ性質の判断を VAL 側だけ本機能が抱えることになる。
+  4. `val_split_mode=ValSplitMode.NONE` を固定値として渡し、分割方式を設定として公開しない。`DatasetSplit` から `VAL` を外す。
+- **Selected Approach**: 4。
+- **Rationale**: VAL の生成という副作用が消え、`images(TRAIN)` / `images(TEST)` がディレクトリ構成と一致する。分割方式を選ばせないことで、評価用分割の所有が `evaluation-framework` に一元化され、TEST 側の判断（TRAIN サンプリングは境界外）と対称になる。`ValSplitMode.NONE` では `val_data` 属性が生成されないため VAL を返す経路自体が無く、常に失敗する引数値を `DatasetSplit` に残さない。
+- **Trade-offs**: 検証用の部分集合を本機能から直接得られない。下流は TRAIN のパッチ特徴を自前で分割する。あわせて RNG を使う経路が 1 つも残らないため、`seed` を設定項目として持つ必要がなくなった。
+
+### Decision: TEST 側は `FROM_DIR` に固定し、正常テスト画像を必須にする
+
+- **Context**: `val_split_mode` を固定しても `_create_test_split()` が残る。`test_split_mode` の既定 `FROM_DIR` は、正常テスト画像が無いと TRAIN から `test_split_ratio` の割合をサンプリングして TEST に混ぜ、`seed` が `None` のため実行ごとに結果が変わる。
+- **Alternatives Considered**:
+  1. `TestSplitMode.NONE` を既定にする — TRAIN サンプリングは構造的に止まるが、`has_normal` が真のとき `split_by_label` の後に正常テスト画像を再結合しないため、TEST が異常のみになる（実測で 7 件 → 4 件、正常 0 件）。下流の評価に必要な正常テスト画像を失う。
+  2. TRAIN サンプリングを許し、`seed` を必須にする — TEST は決定的になるが、TRAIN から評価用の正常画像を切り出す判断を本機能が持つことになる。これは `evaluation-framework` の責務であり、境界外。
+  3. `test_split_mode=TestSplitMode.FROM_DIR` を明示的に渡し、`folder_image_source` の `normal_test_dir` を必須引数にしてサンプリング経路に入らせない。
+- **Selected Approach**: 3。
+- **Rationale**: `has_normal` が常に真になるため `test_split_ratio` を読む分岐に入らず、TEST はディレクトリ構成そのままになる。`Visa` は split 変換で正常テスト画像を必ず生成するため同じ条件を満たす。必須化を型で表せるので、実行時検証を増やさずに済む。
+- **Trade-offs**: 正常テスト画像を持たないディレクトリ構成を受け付けなくなる。TEST の作り方を呼び出し側に委ねる形になるが、リークのない評価分割は下流の所有であり境界と整合する。
+
+### Decision: マスク未提供の表現を `gt_mask` の有無だけで決める
+
+- **Context**: 要件 1.2 / 1.3。anomalib は task=SEGMENTATION の正常サンプルへ全ゼロ `uint8` マスクを合成し、task は `mask_path` が全件空かで自動推論される。
+- **Alternatives Considered**:
+  1. 全ゼロマスクを「未提供」とみなして `None` へ丸める — `mask_dir` あり構成の正常画像（マスクあり・異常画素なし）と、マスクを持たないデータセットが区別できなくなる。
+  2. 正常サンプルは常に `None`、異常サンプルのみマスクを持たせる — ラベルとマスク有無を結び付けてしまい、正常画像に対する画素単位評価ができない。
+  3. `ImageItem.gt_mask` が `None` かどうかだけで決め、非 `None` は `> 0` の bool 配列にする。
+- **Selected Approach**: 3。
+- **Rationale**: 未提供の判定がデータセット構成（task の推論結果）に一意に対応し、画像単位で揺れない。「マスク未提供」と「異常画素ゼロ」を下流が区別できる。
+- **Trade-offs**: `mask_dir` あり構成では正常画像分の全 False 配列を保持するメモリコストが生じる。1 画像単位の処理であり、画素あたり 1 バイトで済むため許容する。
 
 ### Decision: タイル化を自作し、anomalib `Tiler` を採用しない
 
@@ -200,7 +247,7 @@
 - **Context**: 出力側では `ExtractorIdentity`（同一性）と `ExtractionConditions`（条件）を分けている。入力側の `BackboneConfig` に `tile_batch_size` と `device` を同居させると、同じ抽出器をデバイス違いで走らせる構成で `BackboneConfig` が 2 つ必要になり、要件 4.1 の「設定の変更だけで切り替える」が実行条件の再指定を伴う。
 - **Alternatives Considered**:
   1. `BackboneConfig` に実行条件を残す — 型は 1 つで済むが、1 フィールド群が 2 つの意味を持ち、切替の単位と実行の単位が分離できない。
-  2. 実行条件を `TimmPatchExtractor.load` の個別引数にする — 型は増えないが、`ExtractionConditions` へ記録する際に呼び出し側が値を組み直す必要があり、記録値と適用値が食い違う余地が残る。
+  2. 実行条件を抽出器ファクトリの個別引数にする — 型は増えないが、`ExtractionConditions` へ記録する際に呼び出し側が値を組み直す必要があり、記録値と適用値が食い違う余地が残る。
   3. `ExtractionRuntimeConfig`（`tile_batch_size`・`device`）へ分離し、`load` の第 3 引数として受け取り、そのまま `runtime` プロパティで公開して `ExtractionConditions.runtime` に記録する。
 - **Selected Approach**: 3。
 - **Rationale**: 「どの抽出器か」と「どう実行したか」が別の型になり、`ExtractorIdentity` / `ExtractionConditions` の出力側の分離と対称になる。記録する値は適用した設定オブジェクトそのものであり、組み直しが発生しない。
@@ -212,13 +259,13 @@
 - **Alternatives Considered**:
   1. 黙って無視する — 条件が揃っていないのに揃っているように見え、比較実験の前提を壊す。
   2. CNN 側に独自の正規化を実装する — バックボーン固有の学習済み最終 norm とは別物であり、「同一の解釈」にならない。
-  3. 構築時に `ValueError` で拒否する。
-- **Selected Approach**: 3。
-- **Rationale**: 条件が適用できないことを実行前に明示できる。比較実験の設計は `evaluation-framework` の責務であり、本 spec は不整合を検出して伝えるのが正しい振る舞いである。
+  3. 構築前に `ValueError` で拒否する。
+- **Selected Approach**: 3。拒否は既定値を決める `resolve_preprocessing` が行う。
+- **Rationale**: 条件が適用できないことを実行前に明示できる。比較実験の設計は `evaluation-framework` の責務であり、本 spec は不整合を検出して伝えるのが正しい振る舞いである。既定の決定と明示指定の拒否は「`features_only` 経路では `norm` が効かない」という同一の事実に基づくため、規則の所有者を 1 つの関数に置く。
 
 ## Risks & Mitigations
 
-- **`opencv-python-headless` の破損で `anomalib.data` が import できない** — 実装タスクの前提条件として再インストールを行う。解消しない限り入力アダプタのテストは実行できない。
+- **`opencv-python-headless` の配布物欠損で `anomalib.data` が import できなくなる** — 調査時に発生し、`uv sync --extra llm --reinstall-package opencv-python-headless` で復旧済みである。`uv sync` は dist-info が残っている限り再インストールしないため、再発時も `--reinstall-package` を使う。
 - **1 画像あたりのパッチ特徴がメモリを圧迫する（8000x8000、タイル 512 で約 400 MB）** — `PatchFeatureSet` を画像単位で完結させ、逐次処理を可能にする。永続化とストリーミングは `patch-feature-store` の責務として境界外に置く。
 - **デバイス・ドライバの差で数値が変わる** — 再現性の保証範囲を「同一デバイス・同一ランタイム」と設計に明記し、`device` を条件として記録する。
 - **DINOv3 の重みライセンス（`dinov3-license`、タグにより非商用研究限定）** — 本 spec はバックボーン名を設定として受け取るのみで、採用可否の判断は運用・法務側に残る。既定値の選択時に `lvd1689m` タグと `.eupe_lvd1689m` タグを区別する。
