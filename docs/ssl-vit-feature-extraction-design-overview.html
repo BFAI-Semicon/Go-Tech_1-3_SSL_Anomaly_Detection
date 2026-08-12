@@ -1,0 +1,711 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ssl-vit-feature-extraction 設計サマリ</title>
+<style>
+  :root {
+    color-scheme: only light;
+    --bg: #fcfcfc;
+    --bg-soft: #f4f4f5;
+    --bg-code: #f1f1f3;
+    --fg: #17181c;
+    --fg-2: #4b4d55;
+    --fg-3: #74767f;
+    --line: #dcdce0;
+    --line-2: #ebebee;
+    --accent: #2f6fb0;
+    --warn-bg: #fdf6e7;
+    --warn-line: #e0c48a;
+    --ok: #1f7a55;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  }
+  * { box-sizing: border-box; }
+  html {
+    scroll-behavior: smooth;
+    background: #fcfcfc;
+    color: #17181c;
+  }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background: #fcfcfc;
+    color: #17181c;
+    font-family: system-ui, -apple-system, "Hiragino Kaku Gothic ProN", "Noto Sans JP", Meiryo, sans-serif;
+    font-size: 15px;
+    line-height: 1.75;
+  }
+  .layout {
+    display: grid;
+    grid-template-columns: 232px minmax(0, 1fr);
+    gap: 40px;
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 40px 28px 96px;
+  }
+  nav {
+    position: sticky;
+    top: 32px;
+    align-self: start;
+    font-size: 13px;
+    border-left: 1px solid var(--line);
+    padding-left: 14px;
+  }
+  nav p { margin: 0 0 10px; color: var(--fg-3); letter-spacing: .04em; }
+  nav ol { list-style: none; margin: 0; padding: 0; }
+  nav li { margin: 0 0 4px; }
+  nav a { color: var(--fg-2); text-decoration: none; }
+  nav a:hover { color: var(--accent); }
+  header h1 { font-size: 27px; line-height: 1.4; margin: 0 0 6px; letter-spacing: -.01em; }
+  header .src { color: var(--fg-3); font-size: 13px; margin: 0; }
+  section { margin-top: 52px; }
+  section > h2 {
+    font-size: 19px;
+    margin: 0 0 14px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--line);
+  }
+  h3 { font-size: 15px; margin: 28px 0 8px; }
+  p { margin: 0 0 12px; }
+  .lead { font-size: 16px; }
+  code, .mono { font-family: var(--mono); font-size: .9em; }
+  p code, li code, td code, th code, summary code {
+    background: var(--bg-code);
+    border-radius: 4px;
+    padding: .1em .35em;
+  }
+  pre {
+    background: var(--bg-code);
+    border: 1px solid var(--line-2);
+    border-radius: 8px;
+    padding: 14px 16px;
+    overflow-x: auto;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    line-height: 1.6;
+    margin: 0 0 12px;
+  }
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(148px, 1fr));
+    gap: 12px;
+    margin: 20px 0 0;
+  }
+  .stat { border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; }
+  .stat b { display: block; font-size: 26px; font-weight: 600; line-height: 1.2; letter-spacing: -.02em; }
+  .stat span { color: var(--fg-3); font-size: 12px; }
+  table { width: 100%; border-collapse: collapse; margin: 0 0 12px; font-size: 13.5px; }
+  th, td { text-align: left; vertical-align: top; padding: 8px 10px; border-bottom: 1px solid var(--line-2); }
+  th { color: var(--fg-3); font-weight: 600; font-size: 12px; letter-spacing: .03em; border-bottom: 1px solid var(--line); }
+  tbody tr:hover { background: var(--bg-soft); }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .own-self td:last-child { color: var(--ok); }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
+  .card { border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; }
+  .card h4 { margin: 0 0 6px; font-size: 13px; color: var(--fg-3); font-weight: 600; }
+  .card p { margin: 0; font-size: 13.5px; }
+  figure { margin: 0 0 12px; }
+  figure svg { display: block; width: 100%; height: auto; }
+  figcaption { color: var(--fg-3); font-size: 12.5px; margin-top: 8px; }
+  details {
+    border-bottom: 1px solid var(--line-2);
+    padding: 10px 0;
+  }
+  details summary { cursor: pointer; font-weight: 600; font-size: 14px; }
+  details summary::marker { color: var(--fg-3); }
+  details > div { margin-top: 8px; font-size: 13.5px; color: var(--fg-2); }
+  .note {
+    border: 1px solid var(--warn-line);
+    background: var(--warn-bg);
+    border-radius: 8px;
+    padding: 14px 18px;
+  }
+  .note h3 { margin: 0 0 8px; font-size: 14px; }
+  .note ul { margin: 0; padding-left: 20px; font-size: 13.5px; }
+  .note li { margin-bottom: 3px; }
+  ul.tight { margin: 0 0 12px; padding-left: 20px; }
+  ul.tight li { margin-bottom: 4px; }
+  .bars { display: grid; grid-template-columns: max-content minmax(0, 1fr) max-content; gap: 6px 12px; align-items: center; font-size: 13.5px; }
+  .bars .track { background: var(--bg-soft); border-radius: 3px; height: 14px; }
+  .bars .fill { background: var(--accent); height: 14px; border-radius: 3px; }
+  .bars .v { color: var(--fg-3); font-variant-numeric: tabular-nums; }
+  footer { margin-top: 64px; padding-top: 16px; border-top: 1px solid var(--line); color: var(--fg-3); font-size: 12.5px; }
+  @media (max-width: 900px) {
+    .layout { grid-template-columns: minmax(0, 1fr); gap: 0; padding: 24px 18px 64px; }
+    nav { position: static; border-left: 0; border-bottom: 1px solid var(--line); padding: 0 0 16px; margin-bottom: 8px; }
+    nav ol { columns: 2; }
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+
+<nav>
+  <p>目次</p>
+  <ol>
+    <li><a href="#overview">1. この spec の要旨</a></li>
+    <li><a href="#architecture">2. 層構成と依存方向</a></li>
+    <li><a href="#decisions">3. 3 つの設計判断</a></li>
+    <li><a href="#flow">4. 抽出フロー</a></li>
+    <li><a href="#api">5. 公開 API</a></li>
+    <li><a href="#data">6. データモデル</a></li>
+    <li><a href="#ownership">7. 所有と非所有</a></li>
+    <li><a href="#traceability">8. 要件との対応</a></li>
+    <li><a href="#errors">9. エラーの分類</a></li>
+    <li><a href="#rules">10. 実測から決まった規則</a></li>
+    <li><a href="#contracts">11. import-linter 契約</a></li>
+    <li><a href="#tests">12. テスト計画</a></li>
+    <li><a href="#retrigger">13. 再検証トリガー</a></li>
+  </ol>
+</nav>
+
+<main>
+<header>
+  <h1>ssl-vit-feature-extraction 設計サマリ</h1>
+  <p class="src">出典: <code>.kiro/specs/ssl-vit-feature-extraction/design.md</code>（949 行）／新設パッケージ <code>src/feature_extraction</code>。この HTML は要約であり、正典は design.md。</p>
+</header>
+
+<section id="overview">
+  <h2>1. この spec の要旨</h2>
+  <p class="lead">検査画像を取り込み、タイル化・パッチ化し、重み固定の自己教師あり事前学習済み ViT でパッチ特徴を生成する、パイプラインの起点パッケージ <code>feature_extraction</code> を新設する。生成物は「1 画像 = 1 <code>PatchFeatureSet</code>」で、各パッチには元画像内の位置が、画像単位ではドメインタグ・由来キー・抽出器同一性メタ・抽出条件が付随する。</p>
+  <p>利用者は下流 spec の合成ルート（<code>patch-feature-store</code>、<code>primary-anomaly-detection</code>、<code>evaluation-framework</code>）であり、これらは本機能が定義する型だけを介して特徴を受け取り、anomalib・timm・torch の型に依存しない。既存 <code>correction_layer</code> と同じ層パターン（<code>model</code> → <code>geometry</code> / <code>boundary</code> → <code>engine</code>）を踏襲した 2 つ目のパッケージになる。</p>
+
+  <div class="stats">
+    <div class="stat"><b>12</b><span>実装モジュール</span></div>
+    <div class="stat"><b>24</b><span>公開 API の名前</span></div>
+    <div class="stat"><b>29</b><span>受入基準（要件 6 件）</span></div>
+    <div class="stat"><b>5</b><span>追加 import-linter 契約</span></div>
+    <div class="stat"><b>50</b><span>計画テスト項目</span></div>
+  </div>
+
+  <h3>Goals</h3>
+  <ul class="tight">
+    <li>データセット入力（画像・split・画像単位ラベル・正解マスク）を本機能の型へ閉じ込め、anomalib の型を下流へ漏らさない。</li>
+    <li>超高解像度画像を、領域欠落なく、暗黙のリサイズなしにタイル化し、1 枚あたり数千〜数万パッチの特徴を生成する。</li>
+    <li>バックボーンを設定値の変更だけで切り替え、前処理条件を全バックボーンに同一の解釈で適用する。</li>
+    <li>各パッチに元画像座標の位置を、画像単位にドメインタグ・由来キーを付与する。</li>
+    <li>抽出器同一性メタ（バックボーン名・重みリビジョン・前処理条件・埋め込み次元）と抽出条件（パッチ数・タイル化条件）を出力する。</li>
+  </ul>
+
+  <h3>Non-Goals</h3>
+  <ul class="tight">
+    <li>異常スコア計算・ヒートマップ・ROI 抽出、特徴の永続化・索引・近傍検索・coreset、評価指標の算出。</li>
+    <li>バックボーンの重み更新、ローカルでの自己教師あり事前学習、MAE 再構成経路。</li>
+    <li>複数層特徴の融合・マルチスケール抽出（1 回の抽出は単一層に閉じる）。</li>
+    <li>ドメインタグの生成・正規化・外部システムとの突合（値は入力から供給される）。</li>
+  </ul>
+</section>
+
+<section id="architecture">
+  <h2>2. 層構成と依存方向</h2>
+  <figure>
+    <svg viewBox="0 0 900 372" role="img" aria-label="feature_extraction の層構成と import 方向">
+      <defs>
+        <marker id="ar" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L8,4 L0,8 z" fill="currentColor" opacity=".55"/>
+        </marker>
+      </defs>
+      <g fill="none" stroke="currentColor" stroke-opacity=".55" marker-end="url(#ar)">
+        <line x1="240" y1="66" x2="240" y2="94"/>
+        <line x1="660" y1="66" x2="660" y2="94"/>
+        <line x1="300" y1="238" x2="300" y2="264"/>
+        <line x1="690" y1="238" x2="690" y2="264"/>
+        <line x1="206" y1="162" x2="252" y2="186"/>
+        <line x1="388" y1="162" x2="344" y2="186"/>
+        <line x1="222" y1="316" x2="242" y2="316"/>
+        <line x1="356" y1="316" x2="376" y2="316"/>
+        <line x1="476" y1="316" x2="496" y2="316"/>
+      </g>
+
+      <g font-size="12" fill="currentColor" fill-opacity=".55" text-anchor="end">
+        <text x="94" y="46">engine</text>
+        <text x="94" y="150">boundary / geometry</text>
+        <text x="94" y="320">model</text>
+      </g>
+
+      <g stroke="currentColor" stroke-opacity=".22" fill="none">
+        <rect x="110" y="94" width="380" height="144" rx="8"/>
+        <rect x="510" y="94" width="370" height="144" rx="8"/>
+        <rect x="110" y="264" width="770" height="82" rx="8"/>
+      </g>
+      <g font-size="11" fill="currentColor" fill-opacity=".45">
+        <text x="122" y="112">boundary（外部依存はここだけ）</text>
+        <text x="522" y="112">geometry（純関数）</text>
+        <text x="122" y="282">model（型・Protocol・設定）</text>
+      </g>
+
+      <g font-size="12.5" text-anchor="middle" fill="currentColor">
+        <g stroke="#2f6fb0" fill="none"><rect x="110" y="22" width="264" height="44" rx="6"/></g>
+        <text x="242" y="49">engine.py — FeatureExtractionEngine</text>
+
+        <g stroke="currentColor" stroke-opacity=".35" fill="none">
+          <rect x="126" y="124" width="160" height="38" rx="6"/>
+          <rect x="302" y="124" width="172" height="38" rx="6"/>
+          <rect x="212" y="186" width="176" height="38" rx="6"/>
+          <rect x="530" y="124" width="150" height="38" rx="6"/>
+          <rect x="700" y="124" width="164" height="38" rx="6"/>
+          <rect x="132" y="298" width="90" height="36" rx="6"/>
+          <rect x="242" y="298" width="114" height="36" rx="6"/>
+          <rect x="376" y="298" width="100" height="36" rx="6"/>
+          <rect x="496" y="298" width="86" height="36" rx="6"/>
+          <rect x="590" y="298" width="86" height="36" rx="6"/>
+        </g>
+        <text x="206" y="148">timm_backbone</text>
+        <text x="388" y="148">anomalib_source</text>
+        <text x="300" y="210">backbone_identity</text>
+        <text x="605" y="148">tiling</text>
+        <text x="782" y="148">patch_positions</text>
+        <text x="177" y="321">ports</text>
+        <text x="299" y="321">features</text>
+        <text x="426" y="321">config</text>
+        <text x="539" y="321">types</text>
+        <text x="633" y="321">layout</text>
+      </g>
+      <g font-size="11" fill="currentColor" fill-opacity=".45" text-anchor="middle">
+        <text x="695" y="182">互いに独立（engine が合成する）</text>
+        <text x="790" y="321">types と layout は同一段で互いに独立</text>
+      </g>
+    </svg>
+    <figcaption>矢印は import する向き。逆流と <code>boundary</code> ⇄ <code>geometry</code> の相互 import は禁止。外部依存（<code>anomalib</code>・<code>timm</code>・<code>torch</code>・<code>huggingface_hub</code>）は <code>boundary</code> の内側にのみ存在し、<code>model</code> / <code>geometry</code> / <code>engine</code> は numpy・pydantic・標準ライブラリだけに依存する。この 3 点はすべて import-linter の契約で CI 検査する。</figcaption>
+  </figure>
+
+  <h3>ファイル構造</h3>
+<pre>src/feature_extraction/
+├── __init__.py            公開 API。__all__ でドメイン型・操作・例外のみを公開
+├── engine.py              合成ルート。FeatureExtractionEngine（画像→PatchFeatureSet）
+├── model/
+│   ├── types.py           DatasetSplit, ImageLabel, DomainTags, ProvenanceKeys,
+│   │                      ImageMetadata, InspectionImage
+│   ├── layout.py          TilePlacement, TilePlan
+│   ├── config.py          TilingConfig, PreprocessingConfig, BackboneConfig,
+│   │                      ExtractionRuntimeConfig, FeatureLayout, FeatureNormalization
+│   ├── features.py        ResolvedPreprocessing, ExtractorIdentity,
+│   │                      ExtractionConditions, PatchFeatureSet
+│   └── ports.py           InspectionImageSource, PatchFeatureExtractor
+├── geometry/
+│   ├── tiling.py          plan_tiles / crop_tiles
+│   └── patch_positions.py patch_positions（タイル座標→元画像パッチ座標）
+└── boundary/
+    ├── anomalib_source.py AnomalibDatasetSource, visa_image_source,
+    │                      folder_image_source, DatasetInputError
+    ├── timm_backbone.py   TimmPatchExtractor, timm_patch_extractor,
+    │                      BackboneUnavailableError
+    └── backbone_identity.py resolve_preprocessing, resolve_weight_revision,
+                             resolve_extractor_identity</pre>
+  <p><code>boundary/*</code> の分割単位は「1 外部境界 1 モジュール」であり、外部パッケージの数とは一致しない。<code>timm_backbone.py</code> が anomalib・timm・torch の 3 つを import するのは、これらが「バックボーン構築と推論」という 1 つの境界を構成する不可分の組だからである。同モジュールが 300 行に達した場合は、テンソル整形（入力正規化・端数パディング・形状正規化）を <code>boundary/tensor_shaping.py</code> へ切り出し、同じ変更で layers 契約にも段を追加する。</p>
+
+  <h3>技術スタック</h3>
+  <table>
+    <thead><tr><th>役割</th><th>採用</th></tr></thead>
+    <tbody>
+      <tr><td>入力アダプタ</td><td><code>anomalib.data</code> の <code>Visa</code> / <code>Folder</code> DataModule。<code>prepare_data()</code> → <code>setup()</code> の後、DataLoader を使わず <code>Dataset.__getitem__</code> を直接反復する</td></tr>
+      <tr><td>特徴抽出</td><td>anomalib 2.6.0 の <code>TimmFeatureExtractor</code> ＋ timm 1.0.28。DINOv3 は <code>vit_*_patch16_dinov3</code></td></tr>
+      <tr><td>重み配布</td><td>Hugging Face Hub の timm ミラー。リビジョン固定は <code>hf-hub:&lt;repo&gt;@&lt;revision&gt;</code> 形式のモデル名で行う</td></tr>
+      <tr><td>数値表現</td><td>公開契約は numpy（float32 / int32）。torch は <code>boundary</code> 内部だけ</td></tr>
+      <tr><td>設定検証</td><td>pydantic v2（<code>extra="forbid"</code>）。内部の値オブジェクトは frozen dataclass</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="decisions">
+  <h2>3. 3 つの設計判断</h2>
+  <div class="cards">
+    <div class="card">
+      <h4>① Protocol 注入</h4>
+      <p><code>engine</code> は具体実装を型として知らず、<code>InspectionImageSource</code> と <code>PatchFeatureExtractor</code> の 2 つの Protocol だけを受け取る。合成ルートを組むのは下流 spec の呼び出し側であり、どの入力元・どのバックボーンを使うかの選択も呼び出し側が行う。</p>
+    </div>
+    <div class="card">
+      <h4>② 設定は境界で解決する</h4>
+      <p>タイル化条件・前処理条件・バックボーン指定は境界で解決し、内部には解決済みの値だけを流す。解決は構築前に 1 度だけ行い、「構築に適用した値と記録する値が一致する」不変条件を保つ。</p>
+    </div>
+    <div class="card">
+      <h4>③ バックボーン差は boundary で吸収</h4>
+      <p>ViT のトークン列（<code>output_fmt="NLC"</code>）と CNN の特徴マップ（<code>"NCHW"</code>）の差は <code>boundary</code> 内で <code>(タイル数, パッチ数, 次元)</code> へ正規化し、<code>geometry</code> と <code>engine</code> は「パッチストライド」という単一の概念だけを扱う。</p>
+    </div>
+  </div>
+</section>
+
+<section id="flow">
+  <h2>4. 抽出フロー</h2>
+  <figure>
+    <svg viewBox="0 0 900 132" role="img" aria-label="extract_image の処理パイプライン">
+      <defs>
+        <marker id="ar2" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L8,4 L0,8 z" fill="currentColor" opacity=".55"/>
+        </marker>
+      </defs>
+      <g stroke="currentColor" stroke-opacity=".55" marker-end="url(#ar2)" fill="none">
+        <line x1="128" y1="76" x2="150" y2="76"/>
+        <line x1="272" y1="76" x2="294" y2="76"/>
+        <line x1="428" y1="76" x2="450" y2="76"/>
+        <line x1="562" y1="76" x2="584" y2="76"/>
+        <line x1="694" y1="76" x2="716" y2="76"/>
+        <path d="M660 58 C660 30 470 30 470 56"/>
+      </g>
+      <g stroke="currentColor" stroke-opacity=".35" fill="none">
+        <rect x="8" y="56" width="120" height="40" rx="6"/>
+        <rect x="150" y="56" width="122" height="40" rx="6"/>
+        <rect x="294" y="56" width="134" height="40" rx="6"/>
+        <rect x="450" y="56" width="112" height="40" rx="6"/>
+        <rect x="584" y="56" width="110" height="40" rx="6"/>
+      </g>
+      <g stroke="#2f6fb0" fill="none"><rect x="716" y="56" width="176" height="40" rx="6"/></g>
+      <g font-size="12.5" text-anchor="middle" fill="currentColor">
+        <text x="68" y="81">InspectionImage</text>
+        <text x="211" y="81">plan_tiles</text>
+        <text x="361" y="81">patch_positions</text>
+        <text x="506" y="81">crop_tiles</text>
+        <text x="639" y="81">extract</text>
+        <text x="804" y="81">PatchFeatureSet</text>
+      </g>
+      <g font-size="11" fill="currentColor" fill-opacity=".45" text-anchor="middle">
+        <text x="565" y="22">tile_batch_size 枚ずつ反復（打ち切り分岐なし）</text>
+        <text x="68" y="114">(3, H, W) float32</text>
+        <text x="211" y="114">TilePlan</text>
+        <text x="361" y="114">(P, 2) int32</text>
+        <text x="639" y="114">(n, パッチ数, 次元)</text>
+        <text x="804" y="114">embeddings (P, D) + メタ</text>
+      </g>
+    </svg>
+    <figcaption>末尾の端数バッチは <code>boundary</code> 内部で <code>0.0</code> を充填して規定サイズまで詰め、出力の余剰行を破棄する。これは同一バッチ形状でのみ数値が再現するという実測に基づく再現性の担保手段であり、<code>runtime</code>（<code>tile_batch_size</code>・<code>device</code>）は抽出条件として <code>PatchFeatureSet</code> に記録される。</figcaption>
+  </figure>
+
+  <table>
+    <thead><tr><th class="num">#</th><th>呼び出し</th><th>担当</th><th>得られるもの</th></tr></thead>
+    <tbody>
+      <tr><td class="num">1</td><td><code>plan_tiles(H, W, tiling)</code></td><td><code>geometry.tiling</code></td><td><code>TilePlan</code>（タイル原点列。末尾は <code>size - tile_size</code> にクランプ）</td></tr>
+      <tr><td class="num">2</td><td><code>patch_positions(plan, patch_stride)</code></td><td><code>geometry.patch_positions</code></td><td><code>positions</code> <code>(P, 2)</code> int32（元画像座標の top, left）</td></tr>
+      <tr><td class="num">3</td><td><code>crop_tiles(pixels, plan, indices)</code></td><td><code>geometry.tiling</code></td><td><code>(n, 3, tile, tile)</code> float32</td></tr>
+      <tr><td class="num">4</td><td><code>extract(tiles)</code></td><td><code>boundary.timm_backbone</code></td><td><code>(n, パッチ数, 次元)</code> float32・有限値のみ</td></tr>
+      <tr><td class="num">5</td><td>3〜4 を <code>runtime.tile_batch_size</code> 単位で反復</td><td><code>engine</code></td><td><code>embeddings</code> <code>(P, embedding_dim)</code></td></tr>
+      <tr><td class="num">6</td><td><code>extractor.identity</code> / <code>runtime</code> を読んで組み立て</td><td><code>engine</code></td><td><code>PatchFeatureSet</code></td></tr>
+    </tbody>
+  </table>
+
+  <h3>engine の契約</h3>
+<pre>class FeatureExtractionEngine:
+    def __init__(self, extractor: PatchFeatureExtractor, tiling: TilingConfig) -> None: ...
+    def extract_image(self, image: InspectionImage) -> PatchFeatureSet: ...
+    def extract_split(
+        self, source: InspectionImageSource, split: DatasetSplit
+    ) -> Iterator[PatchFeatureSet]: ...</pre>
+  <ul class="tight">
+    <li>事前条件: <code>tiling.tile_size % extractor.identity.patch_stride == 0</code>（構築時に検証し、違反は <code>ValueError</code>）。<code>image.pixels</code> は <code>(3, H, W)</code> float32 で <code>H >= tile_size</code> かつ <code>W >= tile_size</code>。</li>
+    <li>事後条件: <code>embeddings.shape == (P, identity.embedding_dim)</code>、<code>positions.shape == (P, 2)</code>、<code>conditions.patch_count == P</code>。<code>positions</code> の各行は元画像の範囲内。</li>
+    <li>不変条件: <code>embeddings</code> と <code>positions</code> の行順が一致する（タイル順・タイル内行優先）。</li>
+    <li><code>extract_split</code> は遅延評価の generator。生成順と件数は <code>source.images(split)</code> と同一で、並べ替え・重複排除・フィルタを行わない。1 枚分が数百 MB になりうるため全画像分を同時に保持しない。</li>
+    <li><code>extract_split</code> の失敗は変換せず即座に伝播し、以降の画像へ進まない。失敗を集約する経路も、飛ばして続行する経路も持たない。すでに <code>yield</code> 済みの結果は呼び出し側に残る。split が空の場合の <code>DatasetInputError</code> は <code>extract_split</code> の呼び出し時点で表面化する。</li>
+  </ul>
+</section>
+
+<section id="api">
+  <h2>5. 公開 API</h2>
+  <p>パッケージルートの <code>__all__</code> は次の 24 名だけを公開する。「呼び出し側が合成ルートを組み立て、出力を読む」ための最小面に限る。</p>
+  <table>
+    <thead><tr><th>カテゴリ</th><th class="num">件数</th><th>名前</th></tr></thead>
+    <tbody>
+      <tr><td>入力型</td><td class="num">6</td><td><code>DatasetSplit</code>, <code>ImageLabel</code>, <code>DomainTags</code>, <code>ProvenanceKeys</code>, <code>ImageMetadata</code>, <code>InspectionImage</code></td></tr>
+      <tr><td>設定型</td><td class="num">6</td><td><code>TilingConfig</code>, <code>PreprocessingConfig</code>, <code>BackboneConfig</code>, <code>ExtractionRuntimeConfig</code>, <code>FeatureLayout</code>, <code>FeatureNormalization</code></td></tr>
+      <tr><td>出力型</td><td class="num">4</td><td><code>ResolvedPreprocessing</code>, <code>ExtractorIdentity</code>, <code>ExtractionConditions</code>, <code>PatchFeatureSet</code></td></tr>
+      <tr><td>Protocol</td><td class="num">2</td><td><code>InspectionImageSource</code>, <code>PatchFeatureExtractor</code></td></tr>
+      <tr><td>操作</td><td class="num">1</td><td><code>FeatureExtractionEngine</code></td></tr>
+      <tr><td>境界の構築口</td><td class="num">3</td><td><code>visa_image_source</code>, <code>folder_image_source</code>, <code>timm_patch_extractor</code></td></tr>
+      <tr><td>例外</td><td class="num">2</td><td><code>DatasetInputError</code>, <code>BackboneUnavailableError</code></td></tr>
+    </tbody>
+  </table>
+  <p><strong>非公開</strong>: <code>plan_tiles</code> / <code>crop_tiles</code> / <code>patch_positions</code> と <code>TilePlan</code> / <code>TilePlacement</code>（端部被覆規則の変更が下流の互換性問題に化けるため）、<code>resolve_preprocessing</code> / <code>resolve_weight_revision</code> / <code>resolve_extractor_identity</code>（個別に呼べると解決と記録の一致を迂回できるため）、および <code>AnomalibDatasetSource</code> / <code>TimmPatchExtractor</code> のクラス自体。生成は 3 つのファクトリ関数だけに限り、外部ライブラリのオブジェクト（anomalib DataModule、構築済み <code>TimmFeatureExtractor</code>）を直接渡す構築経路を誘発しない。呼び出し側が受け取る静的な型は 2 つの Protocol で足りる。</p>
+
+  <h3>Ports</h3>
+<pre>class InspectionImageSource(Protocol):
+    def images(self, split: DatasetSplit) -> Iterator[InspectionImage]: ...
+
+class PatchFeatureExtractor(Protocol):
+    @property
+    def identity(self) -> ExtractorIdentity: ...
+    @property
+    def runtime(self) -> ExtractionRuntimeConfig: ...
+    def extract(self, tiles: np.ndarray) -> np.ndarray: ...</pre>
+  <p>抽出器の同一性（<code>identity</code>）と実行条件（<code>runtime</code>）は別の問い合わせ口とし、1 つの値に混ぜない。パッチストライドは <code>identity.patch_stride</code> から読み、port に専用の口を置かない（同じ値を 2 経路で公開すると一致の維持が手作業になる）。</p>
+</section>
+
+<section id="data">
+  <h2>6. データモデル</h2>
+  <p>集約の単位は「1 画像」。<code>InspectionImage</code> が入力側の集約ルート、<code>PatchFeatureSet</code> が出力側の集約ルートであり、由来キー・ドメインタグ・同一性メタ・抽出条件はすべて画像単位で 1 つだけ存在する。パッチは独立した実体を持たず配列の行として内包されるため、「同一画像由来の全パッチが同一の由来キーを共有する」不変条件が型で保証される。</p>
+
+  <h3>InspectionImage（入力側）</h3>
+  <table>
+    <thead><tr><th>フィールド</th><th>表現</th></tr></thead>
+    <tbody>
+      <tr><td><code>image_id</code></td><td><code>str(ImageItem.image_path)</code>。<code>metadata_index</code> の鍵と同値なので、出力から索引を逆引きできる</td></tr>
+      <tr><td><code>pixels</code></td><td><code>(3, H, W)</code> float32 <code>[0, 1]</code>。元画像の解像度そのまま（リサイズなし）</td></tr>
+      <tr><td><code>split</code></td><td><code>DatasetSplit</code>（<code>TRAIN</code> / <code>TEST</code> の 2 値のみ）</td></tr>
+      <tr><td><code>image_label</code></td><td><code>ImageLabel</code>（<code>NORMAL</code> / <code>ANOMALOUS</code>）</td></tr>
+      <tr><td><code>ground_truth_mask</code></td><td><code>(H, W)</code> bool | <code>None</code>。<code>None</code> は画素単位マスクを持たない構成のみ</td></tr>
+      <tr><td><code>domain</code></td><td><code>DomainTags</code> | <code>None</code>（工程・材料・装置の 3 軸。項目単位でも <code>None</code>）</td></tr>
+      <tr><td><code>provenance</code></td><td><code>ProvenanceKeys</code> | <code>None</code>（wafer_id・lot_id・captured_on）</td></tr>
+    </tbody>
+  </table>
+
+  <h3>PatchFeatureSet（出力側）</h3>
+  <table>
+    <thead><tr><th>フィールド</th><th>表現</th></tr></thead>
+    <tbody>
+      <tr><td><code>image_id</code> / <code>split</code> / <code>image_label</code></td><td>入力側の値をそのまま引き継ぐ</td></tr>
+      <tr><td><code>embeddings</code></td><td><code>(P, embedding_dim)</code> float32。有限値のみ・L2 ノルム非ゼロ。L2 正規化は行わない</td></tr>
+      <tr><td><code>positions</code></td><td><code>(P, 2)</code> int32（元画像座標の top, left）。タイルの重なりにより同一座標が複数回出現しうる</td></tr>
+      <tr><td><code>domain</code> / <code>provenance</code></td><td>画像単位で 1 つ。全パッチが共有する</td></tr>
+      <tr><td><code>identity</code></td><td><code>ExtractorIdentity</code>（backbone_name・weight_revision・feature_layer・feature_layout・embedding_dim・patch_stride・preprocessing）</td></tr>
+      <tr><td><code>conditions</code></td><td><code>ExtractionConditions</code>（tiling・runtime・patch_count）</td></tr>
+    </tbody>
+  </table>
+
+  <h3>設定型：同一性と実行条件を分ける</h3>
+  <table>
+    <thead><tr><th>型</th><th>持つもの</th><th>役割</th></tr></thead>
+    <tbody>
+      <tr><td><code>BackboneConfig</code></td><td><code>name</code>, <code>feature_layer</code>, <code>feature_layout</code>, <code>weights_revision</code></td><td>「どの抽出器か」。この 4 項目が同じなら同じ抽出器であり、<code>ExtractorIdentity</code> の権威になる</td></tr>
+      <tr><td><code>ExtractionRuntimeConfig</code></td><td><code>tile_batch_size</code>（既定 8）, <code>device</code>（既定 "cpu"）</td><td>「どう実行したか」。再現性が成立する条件そのものなので <code>ExtractionConditions.runtime</code> に記録する</td></tr>
+      <tr><td><code>TilingConfig</code></td><td><code>tile_size</code>（&gt; 0）, <code>overlap</code>（0 ≦ overlap &lt; tile_size）</td><td>タイル配置の条件。<code>ExtractionConditions.tiling</code> に記録する</td></tr>
+      <tr><td><code>PreprocessingConfig</code></td><td><code>input_mean</code>, <code>input_std</code>, <code>feature_normalization</code>（すべて省略可）</td><td>未指定は <code>pretrained_cfg</code> とレイアウトから解決し、結果を <code>ResolvedPreprocessing</code> として記録する</td></tr>
+    </tbody>
+  </table>
+  <p>同一バックボーンをデバイス違い・バッチ違いで走らせる構成でも <code>BackboneConfig</code> は 1 つで足り、要件 4.1 の「設定の変更だけで切り替える」が実行条件の再指定を伴わない。分割方式の設定型は持たない（anomalib の <code>ValSplitMode</code> / <code>TestSplitMode</code> は <code>boundary</code> が固定値で渡すだけ）。</p>
+  <p><code>BackboneConfig</code> の <code>_check_layer_matches_layout</code> は <code>TOKENS</code> のとき <code>feature_layer</code> が <code>blocks.&lt;int&gt;</code> 形式であることだけを検証する。<code>FEATURE_MAP</code> の層名に形式制約を課さないのは、CNN の層名が timm のモデル系列ごとに異なり <code>blocks.&lt;stack_idx&gt;</code> も正当な登録名になるためで、正しい条件は「対象バックボーンの層一覧に実在するか」＝ライブラリを構築しないと判定できない条件であり <code>boundary</code> が担う。</p>
+</section>
+
+<section id="ownership">
+  <h2>7. 所有と非所有</h2>
+  <table>
+    <thead><tr><th>関心事</th><th>所有者</th></tr></thead>
+    <tbody class="own-self">
+      <tr><td>データセット入力の取得と本機能型への変換、入力取得失敗の報告契約</td><td>本 spec（boundary.anomalib_source）</td></tr>
+      <tr><td>タイル配置の決定（サイズ・重なり・端部被覆）とパッチ座標への写像</td><td>本 spec（geometry）</td></tr>
+      <tr><td>重み固定バックボーンのロード、前処理条件の解決と適用、パッチ特徴の生成</td><td>本 spec（boundary.timm_backbone / backbone_identity）</td></tr>
+      <tr><td>抽出器同一性メタと抽出条件の値</td><td>本 spec（権威。下流は読むだけで再生成しない）</td></tr>
+    </tbody>
+    <tbody>
+      <tr><td>評価用分割の作成（TRAIN からの検証用部分集合、TRAIN から TEST への正常画像サンプリング、合成異常の生成）</td><td>evaluation-framework</td></tr>
+      <tr><td>特徴の永続化・索引・kNN・coreset・増分追加</td><td>patch-feature-store</td></tr>
+      <tr><td>異常スコア・ヒートマップ・ROI 候補の生成</td><td>primary-anomaly-detection</td></tr>
+      <tr><td>パッチ特徴の L2 正規化</td><td>promptable-correction-layer の PrototypeStore（照会時に所有）</td></tr>
+      <tr><td>ドメインタグ・由来キーの値の生成・正規化・欠損補完</td><td>呼び出し側（値は入力から供給される）</td></tr>
+      <tr><td>重複タイル領域に由来する重複パッチの排除</td><td>誰も行わない（重なりは設定条件として出力に記録するに留める）</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="traceability">
+  <h2>8. 要件との対応</h2>
+  <table>
+    <thead><tr><th>要件</th><th class="num">基準</th><th>主要な実現手段</th></tr></thead>
+    <tbody>
+      <tr><td>1. データセット入力の取得と型の閉じ込め</td><td class="num">6</td><td><code>AnomalibDatasetSource.images(split)</code> が <code>InspectionImage</code> を返す。split は固定値指定で本機能が確定させ、マスクは <code>gt_mask</code> の有無だけで決める。失敗は <code>DatasetInputError(location, reason)</code></td></tr>
+      <tr><td>2. 超高解像度画像のタイル化・パッチ化</td><td class="num">5</td><td><code>plan_tiles</code> の原点クランプでパディングなしに全域被覆。<code>TilingConfig</code> のバリデータが不正値を拒否。固定バッチで全タイルを走査し打ち切り分岐を持たない</td></tr>
+      <tr><td>3. 重み固定バックボーンによる特徴生成</td><td class="num">5</td><td>ロード時に全パラメータの <code>requires_grad</code> を落とし <code>eval()</code> + <code>inference_mode()</code>。固定バッチ形状（端数は <code>0.0</code> 充填）で同一デバイス上の再現性を担保</td></tr>
+      <tr><td>4. バックボーン切替と前処理条件の統一</td><td class="num">4</td><td><code>BackboneConfig</code> の変更だけで切替。未指定条件は <code>pretrained_cfg</code> から解決し <code>ResolvedPreprocessing</code> に記録。適用できない組み合わせは構築前に拒否</td></tr>
+      <tr><td>5. 位置・ドメインタグ・由来キーの付与</td><td class="num">5</td><td><code>patch_positions</code> が元画像座標を全パッチ分生成。タグ・キーは画像単位で保持し、未供給は <code>None</code> のまま補完しない</td></tr>
+      <tr><td>6. 抽出器同一性メタと条件の出力</td><td class="num">4</td><td><code>ExtractorIdentity</code> と <code>ExtractionConditions</code> を <code>PatchFeatureSet</code> が同一オブジェクトで保持。リビジョン解決不可は <code>weight_revision = None</code></td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="errors">
+  <h2>9. エラーの分類</h2>
+  <p>失敗は早期に、原因の対象と理由を伴って送出する。握りつぶしと既定値へのフォールバックを行わない。例外クラスは構造化された情報が必要な 2 箇所だけに定義し、それ以外は <code>ValueError</code> を使う。</p>
+  <table>
+    <thead><tr><th>分類</th><th>送出する型</th><th>代表条件</th><th>判定時点</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>設定エラー</td>
+        <td>pydantic の検証エラー / <code>ValueError</code></td>
+        <td><code>tile_size &lt;= 0</code>、<code>overlap</code> の範囲外、<code>TOKENS</code> × <code>layer3</code>、<code>tile_size % patch_stride != 0</code>、<code>FEATURE_MAP</code> × <code>BACKBONE_FINAL_NORM</code> の明示指定、<code>vit</code> を含む名前 × <code>FEATURE_MAP</code>、解釈できない <code>device</code>、画像寸法 &lt; <code>tile_size</code></td>
+        <td>すべてモデル構築前</td>
+      </tr>
+      <tr>
+        <td>入力エラー</td>
+        <td><code>DatasetInputError(location, reason)</code></td>
+        <td>ルート不在・読み取り不可・<code>prepare_data()</code> / <code>setup()</code> がデータを用意できない・指定 split が空・<code>image_path</code> が <code>None</code></td>
+        <td>ファクトリ呼び出し時（split が空は <code>images(split)</code> 呼び出し時）</td>
+      </tr>
+      <tr>
+        <td>バックボーンエラー</td>
+        <td><code>BackboneUnavailableError(backbone_name, reason)</code></td>
+        <td>未登録 arch 名・不正タグ・<code>feature_layer</code> 不在（構築前検証）／重み取得失敗の <code>OSError</code>・<code>RuntimeError</code>（構築呼び出し）</td>
+        <td>抽出開始前（<code>extract</code> を 1 度も呼ばない）</td>
+      </tr>
+      <tr>
+        <td>メタ取得の縮退</td>
+        <td>例外を送出しない</td>
+        <td>重みリビジョンを解決できない → <code>weight_revision = None</code> で出力を継続</td>
+        <td>唯一の縮退経路</td>
+      </tr>
+    </tbody>
+  </table>
+  <p>設定の組み合わせ不整合を <code>BackboneUnavailableError</code> に入れない。この例外は「重みが取得できない」「バックボーン名が利用できない」ための報告契約である。</p>
+</section>
+
+<section id="rules">
+  <h2>10. 実測から決まった規則</h2>
+  <p>design.md の分量の大半は「ライブラリの既定に委ねると契約が壊れる」箇所の固定である。各行を開くと根拠が読める。</p>
+
+  <details open>
+    <summary>anomalib に分割を作らせない</summary>
+    <div>
+      <p><code>Folder</code> の既定は <code>val_split_mode=FROM_TEST</code> ＋ <code>val_split_ratio=0.5</code> で、<code>test_data</code> を <code>random_split</code> の戻り値で再代入する（<code>Visa</code> は <code>SAME_AS_TEST</code> で VAL を TEST と同一集合にする）。さらに <code>seed=None</code> では <code>torch.randperm</code> をグローバル RNG で回すため分割が実行ごとに変わる。</p>
+      <p>そこで両ファクトリは <code>val_split_mode=ValSplitMode.NONE</code> と <code>test_split_mode=TestSplitMode.FROM_DIR</code> を固定値で渡し、分割方式を設定として受け取らない。<code>DatasetSplit</code> は <code>TRAIN</code> / <code>TEST</code> の 2 つだけで、<code>VAL</code> メンバーを置かない（<code>ValSplitMode.NONE</code> では <code>val_data</code> 属性自体が作られず、常に <code>DatasetInputError</code> になる引数値を型に残さない）。<code>folder_image_source</code> は <code>normal_test_dir</code> を必須にする（無いと TRAIN から TEST へ正常画像がサンプリングされる。実測で TRAIN 6→5 件、TEST 4→5 件になり、移った画像は実行ごとに異なった）。結果として RNG を使う経路が 1 つも残らず、seed を設定項目として持つ必要がない。</p>
+    </div>
+  </details>
+
+  <details>
+    <summary>マスクは <code>gt_mask</code> の有無だけで決める</summary>
+    <div>
+      <p>anomalib は task を「<code>mask_path</code> が全件空かどうか」で推論し、SEGMENTATION のとき正常サンプルへ全ゼロマスクを合成する。したがって同じ正常画像が、<code>mask_dir</code> あり構成では全ゼロの実マスク、なし構成では <code>None</code> になる。</p>
+      <p>本設計は <code>gt_mask is None</code> のときだけ <code>ground_truth_mask = None</code> とし、それ以外は非ゼロを True とする <code>(H, W)</code> bool を返す。合成ゼロマスクを <code>None</code> へ丸めない。丸めると下流が「マスク未提供」と「異常画素ゼロ」を区別できなくなる。よって <code>ground_truth_mask is None</code> は「データセット構成が画素単位マスクを持たない」ことを表し、画像単位では揺れない。</p>
+    </div>
+  </details>
+
+  <details>
+    <summary>重み取得失敗を捕捉する位置は 1 箇所だけ</summary>
+    <div>
+      <p><code>timm.get_pretrained_cfg(name, allow_unregistered=False)</code> はレジストリの辞書引きだけを行い、ネットワークにも重みファイルにも触れない。ここが拒否するのは未登録 arch 名と不正タグ（要件 4.4）である。既定の <code>allow_unregistered=True</code> では未登録 arch に <code>None</code> が返り、以降の <code>.to_dict()</code> が <code>AttributeError</code> になるため <code>False</code> を渡して失敗経路を 1 つにする。</p>
+      <p>実際の重み取得は <code>TimmFeatureExtractor</code> の構築内側の <code>timm.create_model(pretrained=True)</code> で起きる。この 1 呼び出しだけを <code>try</code> で囲み、<code>OSError</code>（Hugging Face hub 由来の失敗はすべてこれを継承する。<code>LocalEntryNotFoundError</code> → <code>FileNotFoundError</code> → <code>OSError</code> 等を MRO で確認済み）と <code>RuntimeError</code>（timm の重み不在・パス不正・<code>state_dict</code> 不一致）を <code>BackboneUnavailableError</code> へ変換し、<code>raise ... from exc</code> で原因を保つ。それ以外の例外型は素通しにして実装の誤りを隠さない。</p>
+    </div>
+  </details>
+
+  <details>
+    <summary>端数バッチは <code>0.0</code> で充填して形状を固定する</summary>
+    <div>
+      <p>数値が再現するのは同一バッチ形状のときだけなので、末尾の端数は <code>runtime.tile_batch_size</code> まで詰めて推論し余剰行を破棄する。<code>eval()</code> 実行では標本間で統計が混ざらない（BatchNorm は running statistics を使い、LayerNorm はトークン内で閉じる）ため充填値は保持行に影響しない。CPU 上の小規模モデルで実 5 枚 + 充填 3 枚の充填内容を 0 と乱数に入れ替えても、保持 5 行がビット単位で一致した。</p>
+      <p>再現性の保証は同一デバイス・同一 <code>tile_batch_size</code> に限る。CPU と CUDA では最大差 1.45e-4 で、CUDA の GEMM はリダクション順序がバッチ内要素数に依存するため決定性 API を全て立てても解消しない。</p>
+    </div>
+  </details>
+
+  <details>
+    <summary><code>weight_revision</code> はキャッシュ照会だけで解決する</summary>
+    <div>
+      <p>解決順序は 明示指定 → Hugging Face キャッシュの commit → <code>None</code> で、ネットワークアクセスを前提にしない。<code>try_to_load_from_cache</code> に <code>model.safetensors</code> → <code>pytorch_model.bin</code> の順で照会し、<code>str</code> が返った候補のパス <code>&lt;cache&gt;/snapshots/&lt;commit&gt;/&lt;候補&gt;</code> の親ディレクトリ名を commit として採る。</p>
+      <p>戻り値は「パス」「非存在がキャッシュ済みであることを表すセンチネル <code>_CACHED_NO_EXIST</code>」「未キャッシュの <code>None</code>」の 3 値。センチネルは真値でありパスとして扱うと不正な commit を記録するため、判定は <code>isinstance(result, str)</code> で行う。<code>config.json</code> は照会しない（timm 登録名での構築では重みファイルしかキャッシュに現れない）。<code>custom_load</code> が真のタグは重みが HF キャッシュに現れないため <code>None</code> へ縮退するが、専用の分岐は設けない。</p>
+    </div>
+  </details>
+
+  <details>
+    <summary><code>vit</code> を含む名前 × <code>FEATURE_MAP</code> は設定エラーとして拒否する</summary>
+    <div>
+      <p><code>TimmFeatureExtractor</code> の経路選択は <code>output_fmt == "NLC"</code> <em>または</em> バックボーン名に <code>vit</code> を含むかで決まるため、この組み合わせはライブラリ上は成立する（実測で <code>vit_small_patch16_dinov3</code> × <code>blocks.5</code> × <code>NCHW</code> が構築・forward とも成功し <code>(2, 384, 4, 4)</code> を返した）。</p>
+      <p>しかし <code>FEATURE_MAP</code> のパッチストライドは <code>reductions</code> から採る規則で、この属性は <code>features_only</code> 経路にしか設定されない。したがって構築前に <code>ValueError</code> で拒否し、<code>BackboneUnavailableError</code> には入れない。<code>feature_layer</code> の実在検証も <code>timm_patch_extractor</code> が行う（anomalib は CNN 経路で見つからない層を警告ログのみで <code>layers</code> から取り除き、ViT 経路では範囲外のブロック番号が最初の forward まで遅延するため、構築成功として扱わない）。</p>
+    </div>
+  </details>
+
+  <details>
+    <summary><code>patch_stride</code> の権威は <code>ExtractorIdentity</code> だけ</summary>
+    <div>
+      <p>port に専用の問い合わせ口を置かず、<code>engine</code> は <code>extractor.identity.patch_stride</code> を読む。<code>positions</code> は <code>(top, left)</code> の 2 列に留め、パッチ辺長を全 P 行に複製しない（権威データから一意に復元できる値の重複保持になるため）。下流は 1 パッチの領域を <code>(top, left)</code> と <code>identity.patch_stride</code> から復元する。</p>
+      <p><code>ExtractorIdentity</code> は <code>feature_layout</code> も持つ。落とすと <code>blocks.&lt;int&gt;</code> が両レイアウトで正当な層名になりうる構成（EfficientNet 系）で、レイアウト違いの 2 つの抽出器が出力上区別できなくなる。パッチストライドは ViT 系で公開属性 <code>patch_size</code>、CNN 系で <code>reductions</code> の該当層の値を採り、内部の <code>feature_info</code> へ直接到達しない。</p>
+    </div>
+  </details>
+
+  <details>
+    <summary>前処理条件の解決と拒否は <code>resolve_preprocessing</code> の 1 箇所に置く</summary>
+    <div>
+      <p>未指定の <code>input_mean</code> / <code>input_std</code> は <code>pretrained_cfg</code> から、未指定の <code>feature_normalization</code> は <code>feature_layout</code> から決める（<code>TOKENS</code> → <code>BACKBONE_FINAL_NORM</code>、<code>FEATURE_MAP</code> → <code>NONE</code>）。同じ関数が <code>FEATURE_MAP</code> × <code>BACKBONE_FINAL_NORM</code> の<strong>明示指定</strong>を <code>ValueError</code> で拒否する。既定を決める規則と適用できない指定を拒否する規則は「<code>features_only</code> 経路では <code>norm</code> が効かない」という同一の事実の裏表なので、2 つのモジュールに分けない。<code>timm_patch_extractor</code> はこの例外を捕捉も変換もせず素通しにする。</p>
+      <p><code>resolve_preprocessing</code> は <code>embedding_dim</code> を必要としない。<code>feature_normalization</code> が <code>TimmFeatureExtractor</code> の <code>norm</code> 引数に対応する以上、解決は構築より前に完了していなければならず、構築後にしか得られない <code>embedding_dim</code> と同じ関数に置くと既定規則が二重化するか、適用値と記録値が食い違う。</p>
+    </div>
+  </details>
+</section>
+
+<section id="contracts">
+  <h2>11. import-linter 契約</h2>
+  <p><code>pyproject.toml</code> の <code>[tool.importlinter]</code> は <code>root_package = "correction_layer"</code>（単数形）であり、新規パッケージは検査対象外になる。<code>root_packages = ["correction_layer", "feature_extraction"]</code> へ書き換え、session option に <code>include_external_packages = true</code> を追加する（外部パッケージを <code>forbidden_modules</code> に置く契約はこの設定がないと拒否される）。既存 3 契約が同一段の区切りに使っている <code>:</code> は <code>|</code> へ直す（<code>:</code> は「非独立」＝相互 import 許可の意味であり、宣言している層独立性が検査されていなかった）。</p>
+<pre>[[tool.importlinter.contracts]]
+name = "feature_extraction の層の依存方向（外側から内側のみ）"
+type = "layers"
+layers = [
+    "feature_extraction.engine",
+    "feature_extraction.boundary | feature_extraction.geometry",
+    "feature_extraction.model",
+]
+
+[[tool.importlinter.contracts]]
+name = "torch / timm / anomalib は boundary の外で import しない"
+type = "forbidden"
+source_modules = [
+    "feature_extraction.model",
+    "feature_extraction.geometry",
+    "feature_extraction.engine",
+]
+forbidden_modules = ["torch", "timm", "anomalib"]
+
+[[tool.importlinter.contracts]]
+name = "geometry 内のモジュールは互いに独立（engine が合成）"
+type = "independence"
+modules = [
+    "feature_extraction.geometry.tiling",
+    "feature_extraction.geometry.patch_positions",
+]
+
+[[tool.importlinter.contracts]]
+name = "model 内は ports → features → config／types・layout の一方向"
+type = "layers"
+layers = [
+    "feature_extraction.model.ports",
+    "feature_extraction.model.features",
+    "feature_extraction.model.config",
+    "feature_extraction.model.types | feature_extraction.model.layout",
+]
+
+[[tool.importlinter.contracts]]
+name = "boundary 内は timm_backbone／anomalib_source → backbone_identity の一方向"
+type = "layers"
+layers = [
+    "feature_extraction.boundary.timm_backbone | feature_extraction.boundary.anomalib_source",
+    "feature_extraction.boundary.backbone_identity",
+]</pre>
+  <p><code>forbidden</code> 契約が「重い依存を <code>boundary</code> に閉じる」という中心的な不変条件を検査する唯一の手段である（<code>layers</code> 契約は内部モジュール間の向きしか見ないため、<code>geometry/tiling.py</code> が torch を import しても検出できない）。間接 import も対象になる一方、まだ誰も import していない外部パッケージは検査対象から外れるだけなので実装途中でも CI は壊れない。<code>layers</code> 契約が列挙するモジュールは非 optional なので、5 契約の追加は全モジュール作成後に行う（<code>Missing layer</code> で失敗する）。</p>
+</section>
+
+<section id="tests">
+  <h2>12. テスト計画</h2>
+  <div class="bars">
+    <span>Unit</span><span class="track"><span class="fill" style="width:100%"></span></span><span class="v">25 件</span>
+    <span>Property（hypothesis）</span><span class="track"><span class="fill" style="width:8%"></span></span><span class="v">2 件</span>
+    <span>Integration</span><span class="track"><span class="fill" style="width:64%"></span></span><span class="v">16 件</span>
+    <span>End-to-End</span><span class="track"><span class="fill" style="width:28%"></span></span><span class="v">7 件</span>
+  </div>
+  <p style="margin-top:12px">棒の長さは項目数（最大 25 件を全幅とする相対表示）。合計 50 件。出典: design.md「Testing Strategy」の列挙数。</p>
+  <table>
+    <thead><tr><th>種別</th><th>代表的な確認内容</th></tr></thead>
+    <tbody>
+      <tr><td>Unit</td><td>タイル配置の被覆とクランプ、設定型の拒否メッセージ、前処理条件とリビジョンの解決順序、<code>try_to_load_from_cache</code> の 3 値処理、構築失敗の例外変換（スタブで <code>OSError</code> / <code>RuntimeError</code> / <code>ValueError</code> を打ち分ける）、<code>requires_grad</code> が False</td></tr>
+      <tr><td>Property</td><td>任意の画像寸法・重なり量で <code>plan_tiles</code> が全画素を被覆し原点が単調増加、<code>patch_positions</code> の全座標が範囲内</td></tr>
+      <tr><td>Integration</td><td>合成 Folder データセットでの split・ラベル・マスク有無、<code>val_split_mode</code> / <code>test_split_mode</code> の実値、疑似抽出器での位置・メタ付与、<code>extract_split</code> の順序・遅延評価・例外伝播、数千パッチ規模での行順一致</td></tr>
+      <tr><td>End-to-End</td><td>実バックボーン（<code>vit_small_patch16_dinov3</code> / <code>wide_resnet50_2</code>）での出力契約、<code>patch_stride</code> とモデル属性の一致、端数バッチのビット一致、別プロセス再実行のハッシュ一致。重みが取得できない環境では skip</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="retrigger">
+  <h2>13. 再検証トリガー</h2>
+  <div class="note">
+    <h3>次のいずれかを変えるときは設計の再確認が必要</h3>
+    <ul>
+      <li><code>PatchFeatureSet</code> / <code>ExtractorIdentity</code> / <code>ExtractionConditions</code> のフィールド追加・削除・意味変更</li>
+      <li><code>positions</code> の座標系（元画像座標・2 列 top, left）またはパッチ順序、および <code>ExtractorIdentity.patch_stride</code> の意味</li>
+      <li><code>InspectionImage</code> の画素表現（<code>(3, H, W)</code> float32 <code>[0, 1]</code>）</li>
+      <li>埋め込みの数値契約（float32・有限値・非ゼロノルム）</li>
+      <li>依存方向、および <code>boundary</code> 外への torch / anomalib 型の露出</li>
+      <li>タイル端部の被覆規則（原点クランプ方式）— パッチ位置の重複分布が変わり下流のバンク構成に影響する</li>
+      <li>split 解決規則（VAL は生成せず TRAIN / TEST のみ、TEST は <code>FROM_DIR</code> 固定で正常テスト画像を必須）とマスク変換規則（<code>gt_mask is None</code> のみ未提供）</li>
+      <li>再現性の保証範囲（同一デバイス・同一 <code>tile_batch_size</code>）</li>
+    </ul>
+  </div>
+</section>
+
+<footer>
+  <p>参照: <code>.kiro/specs/ssl-vit-feature-extraction/design.md</code>（正典）／<code>research.md</code>（anomalib・timm の実測、決定性の検証、代替案の比較）／<code>requirements.md</code>（要件 6 件・受入基準 29 件）。パフォーマンス見積: タイル 512・ストライド 16 で 1 タイル 1024 パッチ、8000 × 8000 画像では約 26 万パッチ・埋め込み 384 次元 float32 で約 400 MB。</p>
+</footer>
+
+</main>
+</div>
+</body>
+</html>
