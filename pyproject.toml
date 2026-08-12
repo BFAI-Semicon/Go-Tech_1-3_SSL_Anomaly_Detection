@@ -83,7 +83,8 @@ pythonpath = ["src"]
 testpaths = ["tests"]
 
 [tool.importlinter]
-root_package = "correction_layer"
+root_packages = ["correction_layer", "feature_extraction"]
+include_external_packages = true
 
 [[tool.importlinter.contracts]]
 name = "層の依存方向（外側から内側のみ）"
@@ -120,4 +121,49 @@ type = "layers"
 layers = [
     "correction_layer.boundary.domain_loader",
     "correction_layer.boundary.schema | correction_layer.boundary.prototype_store",
+]
+
+[[tool.importlinter.contracts]]
+name = "feature_extraction の層の依存方向（外側から内側のみ）"
+type = "layers"
+layers = [
+    "feature_extraction.engine",
+    "feature_extraction.boundary | feature_extraction.geometry",
+    "feature_extraction.model",
+]
+
+[[tool.importlinter.contracts]]
+name = "torch / timm / anomalib は boundary の外で import しない"
+type = "forbidden"
+source_modules = [
+    "feature_extraction.model",
+    "feature_extraction.geometry",
+    "feature_extraction.engine",
+]
+forbidden_modules = ["torch", "timm", "anomalib"]
+
+[[tool.importlinter.contracts]]
+name = "geometry 内のモジュールは互いに独立（engine が合成）"
+type = "independence"
+modules = [
+    "feature_extraction.geometry.tiling",
+    "feature_extraction.geometry.patch_positions",
+]
+
+[[tool.importlinter.contracts]]
+name = "model 内は ports → features → config／types・layout の一方向"
+type = "layers"
+layers = [
+    "feature_extraction.model.ports",
+    "feature_extraction.model.features",
+    "feature_extraction.model.config",
+    "feature_extraction.model.types | feature_extraction.model.layout",
+]
+
+[[tool.importlinter.contracts]]
+name = "boundary 内は timm_backbone／anomalib_source → backbone_identity の一方向"
+type = "layers"
+layers = [
+    "feature_extraction.boundary.timm_backbone | feature_extraction.boundary.anomalib_source",
+    "feature_extraction.boundary.backbone_identity",
 ]
