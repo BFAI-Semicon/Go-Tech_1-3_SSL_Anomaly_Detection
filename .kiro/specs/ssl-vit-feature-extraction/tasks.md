@@ -1,0 +1,132 @@
+# Implementation Plan
+
+## 1. 基盤とモデル契約
+
+- [x] 1.1 パッケージ骨格と層依存契約を整備する
+  - `feature_extraction` パッケージのディレクトリと、設計が列挙する空モジュールを作成する
+  - `pyproject.toml` の import-linter を `root_packages = ["correction_layer", "feature_extraction"]` へ書き換え、session option に `include_external_packages = true` を追加し、既存 `correction_layer` 同一段の `|` を維持したまま `feature_extraction` の 5 契約（同一段も `|`）を追加する
+  - ルート `__init__.py` は空の公開面プレースホルダに留め、最終公開 API は後続タスクが所有する
+  - 完了時: `root_packages` 化と `include_external_packages = true` と 5 契約が揃った状態で `lint-imports` が両パッケージの契約を KEPT で通し、空モジュールを含むパッケージが import 可能である
+  - _Requirements:_ 1.5
+  - _Boundary:_ package-skeleton, project-tooling
+  - _Depends:_ none
+
+- [x] 1.2 入力型とタイル配置型を定義する
+  - split（TRAIN／TEST のみ）・画像ラベル・ドメインタグ・由来キー・画像メタ・検査画像入力型を定義する
+  - タイル配置とタイル計画の値オブジェクトを定義する
+  - 完了時: split 列挙子が TRAIN／TEST の 2 つだけであることと、入力型が numpy／標準型のみで構成されることがテストで確認できる
+  - _Requirements:_ 1.1, 1.3, 1.5
+  - _Boundary:_ model.types, model.layout
+  - _Depends:_ 1.1
+
+- [x] 1.3 抽出設定型を定義し不正値を拒否する
+  - タイル化・前処理・バックボーン同一性・実行条件の設定型と、特徴レイアウト／特徴正規化の列挙を定義する
+  - タイルサイズ・重なり・実行バッチサイズの範囲、TOKENS 時の層名形式、未知フィールド拒否を構築時に強制する
+  - バックボーン設定は同一性だけを持ち、実行条件（バッチサイズ・デバイス）は別型に分離する
+  - 完了時: 不正なタイル化／実行条件、TOKENS×不正層名、バックボーン設定への実行条件混入が項目名と値付きで拒否され、実行条件の既定値が解決される
+  - _Requirements:_ 2.4, 3.3, 4.1, 4.2
+  - _Boundary:_ model.config
+  - _Depends:_ 1.2
+
+- [x] 1.4 出力型と差し替え口を定義する
+  - 解決済み前処理・抽出器同一性・抽出条件・パッチ特徴集合の出力型を定義する
+  - 入力ソースとパッチ特徴抽出器の Protocol を定義し、同一性と実行条件を別問い合わせ口として置く
+  - 完了時: パッチ特徴集合が埋め込み・位置・ドメインタグ・由来キー・同一性メタ・抽出条件を同一オブジェクトで保持する型として参照できる
+  - _Requirements:_ 5.5, 6.1, 6.2, 6.3
+  - _Boundary:_ model.features, model.ports
+  - _Depends:_ 1.3
+
+## 2. 幾何計算
+
+- [x] 2.1 タイル配置と切り出しを実装する
+  - タイルサイズと重なりから原点列を決め、端部は原点クランプで全域を被覆する（ゼロパディングなし）
+  - 計画と索引に基づくタイル切り出しを純関数として実装する
+  - 画像がタイルより小さい場合は画像寸法とタイルサイズを報告して拒否する
+  - 割り切れない寸法の単体テストと、任意寸法での被覆・単調性の property テストを追加する
+  - 完了時: 例示寸法で最終原点が `size - tile_size` にクランプされ、hypothesis により全域被覆と原点の単調非重複が確認できる
+  - _Requirements:_ 2.1, 2.2, 2.3, 2.4
+  - _Boundary:_ geometry.tiling
+  - _Depends:_ 1.3
+
+- [x] 2.2 パッチ座標写像を実装する
+  - タイル計画とパッチストライドから、元画像座標の `(top, left)` 列を生成する
+  - 行順をタイル順・タイル内行優先に固定する
+  - 完了時: パッチ数がタイル数 × `(tile_size // stride) ** 2` と一致し、全座標が画像範囲内に収まることがテストで確認できる
+  - _Requirements:_ 2.3, 5.1
+  - _Boundary:_ geometry.patch_positions
+  - _Depends:_ 1.2
+
+## 3. 境界アダプタ
+
+- [x] 3.1 前処理条件と抽出器同一性の解決を実装する
+  - 未指定の入力正規化と特徴正規化を pretrained 設定とレイアウトから解決し、FEATURE_MAP×最終正規化の明示指定を拒否する
+  - 重みリビジョンを明示指定 → キャッシュ commit → 未取得の順で解決し、キャッシュ照会の 3 値を正しく扱う
+  - 解決済み値から抽出器同一性メタを組み立て、再解決しない
+  - 完了時: 既定解決・明示拒否・リビジョン解決順・センチネル非採用が単体テストで確認できる
+  - _Requirements:_ 4.2, 4.3, 6.1, 6.4
+  - _Boundary:_ backbone_identity
+  - _Depends:_ 1.4
+
+- [x] 3.2 データセット入力アダプタを実装する
+  - VisA／Folder から入力を取得し、本機能の検査画像型へ変換するファクトリとソースを実装する
+  - 分割方式は固定値で「作らせない」規則に従い、VAL 経路を持たない。Folder は正常テストディレクトリを必須にする
+  - マスクは未提供と異常画素ゼロを区別し、DataLoader／collate を使わずネイティブ解像度を保つ
+  - ドメインタグ・由来キーは呼び出し側索引から引き、欠落は補完しない。失敗は所在と理由付きで報告する
+  - 完了時: 合成 Folder（マスクあり／なし）で split・ラベル・マスク・解像度・集合一致と失敗報告がテストで確認でき、anomalib／torch 型が境界外へ出ない
+  - _Requirements:_ 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 5.2, 5.3, 5.4
+  - _Boundary:_ anomalib_source
+  - _Depends:_ 1.2
+
+- [x] 3.3 重み固定バックボーン抽出器を実装する
+  - 構築前検証 → 前処理／リビジョン解決 → 単一層抽出器構築 → 同一性組み立ての順でファクトリを実装する
+  - 全パラメータを凍結し、ViT／CNN レイアウト差を境界内で吸収して同一出力形状へ正規化する
+  - 未登録名・層不在・重み取得失敗は抽出開始前に報告し、レイアウト不整合や解釈不能デバイスは設定エラーとして拒否する
+  - 端数バッチは固定サイズへ充填して推論し余剰行を破棄する。モジュールが肥大化する場合はテンソル整形を同一変更で切り出し、boundary 層契約を更新する
+  - 完了時: 失敗系が抽出未開始で報告され、成功系では `requires_grad` 全 False と契約形状の特徴がテストで確認できる
+  - _Requirements:_ 3.1, 3.2, 3.3, 3.4, 3.5, 4.1, 4.2, 4.4, 6.1
+  - _Boundary:_ timm_backbone
+  - _Depends:_ 3.1
+
+## 4. 合成エンジンと公開面
+
+- [x] 4.1 特徴抽出エンジンを実装する
+  - 注入された抽出器とタイル化条件だけで、タイル計画・座標生成・バッチ推論・メタ付与を合成する
+  - タイルサイズとパッチストライドの整合を構築時に検証し、設定の再解決を行わない
+  - split 反復は入力ソース順の遅延評価とし、途中失敗は変換せず伝播して以降を進めない
+  - 疑似抽出器／疑似ソースによる統合テストで、数千パッチ完走・行順一致・メタ付与・失敗伝播を確認する
+  - 完了時: 1 画像分のパッチ特徴集合が位置・ドメイン・由来・同一性・抽出条件を伴って返り、`patch_count` が埋め込み行数と一致する
+  - _Requirements:_ 2.4, 2.5, 3.1, 3.3, 5.1, 5.2, 5.3, 5.4, 5.5, 6.2, 6.3
+  - _Boundary:_ FeatureExtractionEngine
+  - _Depends:_ 1.4, 2.1, 2.2
+
+- [x] 4.2 パッケージ公開 API を定義する
+  - ルート公開面を、入力型・設定型・出力型・Protocol・エンジン・境界ファクトリ・例外の最小集合に限定する
+  - 幾何関数、条件解決関数、境界の具象クラスは公開しない
+  - 完了時: ルートの公開名集合が設計の公開 API 表と完全一致し、非公開記号が含まれないことがテストで確認できる
+  - _Requirements:_ 1.5
+  - _Boundary:_ public-api
+  - _Depends:_ 3.2, 3.3, 4.1
+
+## 5. 通し検証
+
+- [x] 5.1 実バックボーンによる E2E 検証を追加する
+  - ViT 既定バックボーンと CNN 比較バックボーンで合成画像 1 枚を通し、出力契約・パッチ数・前処理解決を確認する
+  - 端数バッチの保持行一致と、同一デバイス・同一バッチサイズの別プロセス再現を確認する
+  - 重み未取得環境ではテストを skip する
+  - 完了時: 重み取得可能環境で E2E がパスし、埋め込みが有限値かつ非ゼロノルム、同一性メタの次元・ストライドとパッチ数が一致する
+  - _Requirements:_ 3.1, 3.3, 4.1, 4.3, 5.1, 6.1, 6.2, 6.3
+  - _Boundary:_ e2e-validation
+  - _Depends:_ 4.2
+
+## Implementation Notes
+
+- 1.3: FEATURE_MAP は層名形式を課さない（`tests/test_feature_config.py` の FEATURE_MAP×layer3 受理で固定）。実行条件混入拒否は項目名と値付き。
+- 1.4: `PatchFeatureSet` は埋め込み・位置・ドメイン・由来・identity・conditions を同一オブジェクトで保持。`PatchFeatureExtractor` は identity と runtime を別口（`tests/test_feature_features.py`）。
+- 2.1: 単調非重複は `len(pairs)==len(set(pairs))` と初出順厳密増加で固定（空虚な `sorted(set)` オラクルは使わない）。
+- 2.2: 手組み立てでタイル順・行優先の厳密座標を固定。hypothesis は shape/dtype/範囲内性のみ（本番アルゴリズム複製オラクルは使わない）。
+- 3.1: 未指定 mean/std は pretrained_cfg、feature_normalization は layout 既定。FEATURE_MAP×BACKBONE_FINAL_NORM 明示は ValueError。リビジョンは明示→safetensors→bin、`_CACHED_NO_EXIST` は未解決。
+- 3.2: Folder/VisA 固定 split（Val NONE / Test FROM_DIR）。mask 未提供と全 False を区別。metadata 欠落非補完。torch/anomalib 型非漏洩。
+- 3.3: 構築前に device／vit×FEATURE_MAP／pretrained_cfg を確定。OSError・RuntimeError のみ BackboneUnavailableError。成功系は全 requires_grad=False と (n,P,C)。276 行のため tensor_shaping 未分割。
+- 4.1: 構築時 tile_size%patch_stride のみ検証。extract_split は genexp で images() 即時評価＋遅延 extract。疑似抽出器で 36864 パッチ完走・行順一致（`tests/test_extraction_engine.py`）。
+- 4.2: ルート `__all__` は design 公開 API 表の 24 名と完全一致。geometry / resolve_* / 具象境界クラスは非公開（`tests/test_public_api.py`）。
+- 5.1: design E2E 7 ケースを公開 API 経由で追加（`tests/test_extraction_e2e.py`）。subprocess 再現は `timeout=300` と `TimeoutExpired`→fail。再発防止の静的テストあり。

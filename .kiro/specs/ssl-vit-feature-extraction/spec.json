@@ -1,0 +1,22 @@
+{
+  "feature_name": "ssl-vit-feature-extraction",
+  "created_at": "2026-08-12T01:24:17Z",
+  "updated_at": "2026-08-13T01:40:00Z",
+  "language": "ja",
+  "phase": "implemented",
+  "approvals": {
+    "requirements": {
+      "generated": true,
+      "approved": true
+    },
+    "design": {
+      "generated": true,
+      "approved": true
+    },
+    "tasks": {
+      "generated": true,
+      "approved": true
+    }
+  },
+  "ready_for_implementation": true
+}
