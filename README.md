@@ -7,18 +7,39 @@
 
 ## 現状の実装
 
-いま動いているのは **補正レイヤ本体（開発計画 Phase 0–3）** です。合成 fixture
-（ランダム埋め込みの FAISS Flat＋手書きドメイン JSON）だけで、一次判定→適用選別→競合解決→
-二次判定→最終判定の一連を完結します。実 ViT・実ストア・バージョン管理・オントロジー統合は未着手です。
+動いているのは **補正レイヤ本体（開発計画 Phase 0–3）** と **パッチ特徴抽出** の 2 パッケージです。
+特徴量ストア・一次検出・HITL／LLM 構造化・バージョン管理・オントロジー統合は未着手で、
+両パッケージはまだ接続されていません。
 
-| 項目 | 状態 |
-| --- | --- |
-| パッケージ | `src/correction_layer/`（model／boundary／decision／engine） |
-| 公開 API | `CorrectionEngine`・`PrototypeStore`・`load_domain_set`・`ExactAnyAxisMatcher` 等 |
-| テスト | `tests/`（合成 fixture 付き）。`uv run pytest` で 168 passed |
-| CI | `.github/workflows/python-ci.yml`（ruff・`lint-imports`・pytest） |
-| 仕様 | `.kiro/specs/promptable-correction-layer/`（Phase 0–3 タスク完了） |
-| 次 | [`docs/spec-execution-order.md`](docs/spec-execution-order.md) の順で特徴抽出・ストア等へ |
+### `src/correction_layer/` — 補正レイヤ
+
+合成 fixture（ランダム埋め込みの FAISS Flat＋手書きドメイン JSON）だけで、一次判定→適用選別→
+競合解決→二次判定→最終判定の一連を完結します。
+
+- 層: `model`／`boundary`／`decision`／`engine`
+- 公開 API: `CorrectionEngine`・`PrototypeStore`・`load_domain_set`・`ExactAnyAxisMatcher` 等
+- 仕様: `.kiro/specs/promptable-correction-layer/`（Phase 0–3 タスク完了）
+
+### `src/feature_extraction/` — パッチ特徴抽出
+
+重み固定の ViT（DINOv3）／CNN で、画像のタイル化からパッチ特徴・パッチ座標・抽出器同一性までを出します。
+実重みは timm／anomalib の `TimmFeatureExtractor` 経由で取得します。
+
+- 層: `model`／`boundary`／`geometry`／`engine`
+- 公開 API: `FeatureExtractionEngine`・`timm_patch_extractor`・`visa_image_source`・
+  `folder_image_source`・設定型（`BackboneConfig`／`TilingConfig`／`PreprocessingConfig`／
+  `ExtractionRuntimeConfig`）
+- 重みは更新しない（`requires_grad=False`＋`eval`）。ViT は token 出力、CNN は feature map を token 化
+- 抽出器同一性（モデル名・重みリビジョン・前処理条件・埋め込み次元・パッチストライド）を特徴に添付
+- torch／timm／anomalib の import は `boundary` に閉じ、`import-linter` で強制
+- 仕様: `.kiro/specs/ssl-vit-feature-extraction/`（全タスク完了）
+
+### 検証状態
+
+- `uv run pytest` — 279 passed（`tests/`。合成 fixture 中心）
+- `PYTHONPATH=src uv run lint-imports` — 依存方向 9 契約が KEPT
+- CI: `.github/workflows/python-ci.yml`（ruff・`lint-imports`・pytest）
+- 次: [`docs/spec-execution-order.md`](docs/spec-execution-order.md) の順で `patch-feature-store` へ
 
 ```bash
 mise run sync-dev   # 未同期の場合
@@ -62,7 +83,7 @@ mise run sync
 
 - 実体は `uv sync --extra llm`（anomalib[cu130] / timm / faiss-cpu / LLM クライアント等）。
 - 開発用ツール（pytest, ruff, hypothesis, import-linter 等）も入れる場合は `mise run sync-dev`。
-  補正レイヤのテスト・lint を回すだけなら `sync-dev` を推奨します。
+  テスト・lint を回すなら `sync-dev` を推奨します。
 
 > 初回は `torch`（cu130）や `anomalib` の取得・ビルドで時間がかかります。ネットワーク接続が必要です。
 
@@ -73,7 +94,7 @@ mise run gpu-check
 ```
 
 `torch` のバージョンと、CUDA が利用可能か（`cuda True <GPU名>`）が表示されれば成功です。
-補正レイヤ単体の pytest は GPU なしでも実行できます。
+pytest は GPU なしでも実行できます（特徴抽出の E2E は CPU で動き、重みを取得できない環境では skip されます）。
 
 ## 仮想環境有効化の確認
 
@@ -84,21 +105,22 @@ echo $VIRTUAL_ENV   # .venv のパスが表示されれば有効
 
 ## よく使うコマンド
 
-| コマンド               | 内容                                |
-| ---------------------- | ----------------------------------- |
-| `mise install`         | Python / uv / markdownlint 等を導入 |
-| `mise run sync`        | 依存を同期（`uv sync --extra llm`） |
-| `mise run sync-dev`    | 開発用依存も含めて同期              |
-| `mise run gpu-check`   | PyTorch から CUDA が見えるか確認    |
-| `mise run lint-md`     | Markdown を markdownlint で検査     |
-| `mise run lint-md-fix` | Markdown の自動修正可能な指摘を修正 |
-| `uv run pytest`        | 補正レイヤのテストを実行            |
-| `uv run ruff check .`  | Python lint                         |
+| コマンド               | 内容                                     |
+| ---------------------- | ---------------------------------------- |
+| `mise install`         | Python / uv / markdownlint 等を導入      |
+| `mise run sync`        | 依存を同期（`uv sync --extra llm`）      |
+| `mise run sync-dev`    | 開発用依存も含めて同期                   |
+| `mise run gpu-check`   | PyTorch から CUDA が見えるか確認         |
+| `mise run lint-md`     | Markdown を markdownlint で検査          |
+| `mise run lint-md-fix` | Markdown の自動修正可能な指摘を修正      |
+| `uv run pytest`        | テストを実行                             |
+| `uv run ruff check .`  | Python lint                              |
+| `uv run lint-imports`  | 依存方向の契約を検査（`PYTHONPATH=src`） |
 
 ## 補足・注意
 
 - **anomalib は PyPI の `>=2.6,<3`** を使用します（DINOv3 は `TimmFeatureExtractor` 経由。
-  特徴抽出のみ利用し、ストア・スコア化は自前）。
+  特徴抽出・データ読み込み・評価指標に利用し、ストア・スコア化は自前）。
 - **FAISS は `faiss-cpu`** を使用します（aarch64 では GPU 版 wheel が未提供のため）。
 - `.venv` はリポジトリに含めません。`mise run sync` でいつでも再構築できます。
 - 方針・依存方向・段階計画は [`.kiro/steering/`](.kiro/steering/) と [`docs/index.md`](docs/index.md) を参照してください。
@@ -111,10 +133,15 @@ echo $VIRTUAL_ENV   # .venv のパスが表示されれば有効
 ├── mise.toml                 # Python/uv・タスク定義
 ├── pyproject.toml            # 依存・pytest・import-linter 契約
 ├── src/
-│   └── correction_layer/     # 補正レイヤ（Phase 0–3 実装済み）
-│       ├── model/            # 型・port・レコード・DomainSet
-│       ├── boundary/         # スキーマ検証・PrototypeStore・ドメインロード
-│       ├── decision/         # 一次判定・照合・解決・補正
+│   ├── correction_layer/     # 補正レイヤ（Phase 0–3 実装済み）
+│   │   ├── model/            # 型・port・レコード・DomainSet
+│   │   ├── boundary/         # スキーマ検証・PrototypeStore・ドメインロード
+│   │   ├── decision/         # 一次判定・照合・解決・補正
+│   │   └── engine.py         # composition root
+│   └── feature_extraction/   # パッチ特徴抽出（実装済み）
+│       ├── model/            # 入力型・設定・port
+│       ├── boundary/         # timm/anomalib アダプタ・抽出器同一性
+│       ├── geometry/         # タイル配置・パッチ座標
 │       └── engine.py         # composition root
 ├── tests/                    # pytest（合成 fixture 含む）
 ├── scripts/
