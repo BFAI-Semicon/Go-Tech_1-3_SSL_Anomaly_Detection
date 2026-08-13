@@ -238,7 +238,8 @@ tests/
     - `model.query` > `model.criteria`: `NormalSearchQuery.domain` が `DomainCriteria` を持つ。
     - `model.errors` > `model.types`: `NormalityEvidenceRequiredError(kind, reason)` が `PrototypeKind` を持つ。
   - 契約 4（forbidden）: source に `patch_feature_store.model`・`patch_feature_store.catalog`・`patch_feature_store.engine`、forbidden に `faiss`・`torch`・`anomalib`。
-  - 契約 5（layers）: `boundary.snapshot_store` > `boundary.snapshot_schema | boundary.faiss_index | boundary.anomalib_coreset | boundary.clock`。
+  - 契約 5（layers）: `boundary.snapshot_store | boundary.faiss_index | boundary.anomalib_coreset | boundary.clock` > `boundary.snapshot_schema`。
+    - アダプタ同士は independent 指定で相互 import を禁止する。`snapshot_store` を上位層に置くと `faiss_index` などへの import が契約上通ってしまうため、共通の直列化スキーマだけを下層に置き、アダプタは同一層に並べる。
   - 契約 6（forbidden）: source に `correction_layer`・`feature_extraction`、forbidden に `patch_feature_store`。パッケージ間の依存方向を一方向に固定する。
   - 契約 7（forbidden）: source に `patch_feature_store`、forbidden に `correction_layer`。契約 6 は既存パッケージ → store の向きだけを禁止するため、`correction_layer` との相互依存を作らないという宣言（「許可された依存」）を CI で担保するにはこの向きの契約も要る。`feature_extraction` への依存は許可するため forbidden に含めない。
   - 契約の追加は、列挙するモジュールがすべて存在してから行う。`LayersContract` は非 optional の層モジュールがグラフに無いと `Missing layer` で失敗する（`feature_extraction` 追加時に確認済みの挙動）。
@@ -754,6 +755,7 @@ class PatchFeatureStore:
 ##### 責務と制約 (PatchFeatureStore)
 
 - 台帳（`PrototypeRegistry`）とベクトル索引（`VectorIndex`）の同期を担う唯一の場所。`register`・`reselect_coreset`・`prune_expired`・`restore` の 4 経路でのみ両者を更新する。
+- `__init__` と `restore` に渡す `VectorIndex` は空であることを前提とする。`restore` は台帳の再構成後に生存 id を `add` するだけで既存の内容を消さないため、空でない索引を渡すと「生存 id の集合 = 索引の id 集合」という不変条件が構築時点で崩れる。`faiss_flat_index` は常に空の索引を返す。
 - 現在時刻の取得は `Clock` に一本化し、`catalog` へは解決済みの `datetime` を渡す。
 - 状態を変える 3 経路（`register`・`reselect_coreset`・`prune_expired`）は「準備 → コミット」の 2 段で実行する。準備段は検査・最近傍検索・集約計画・間引き対象の決定・識別子の確定までを行い、台帳とジャーナルを変更しない。確定結果は `RegistryChange` として保持する。
 - コミット段の順序は索引 → 台帳 → ジャーナルである。台帳の反映（`apply`）とジャーナル追記は辞書とリストの更新だけで、例外を送出しない。したがって索引更新が失敗した時点で処理を止めれば、台帳とジャーナルは要求前の状態のままになる。
