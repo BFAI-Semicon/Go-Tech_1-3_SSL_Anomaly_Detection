@@ -83,7 +83,7 @@ pythonpath = ["src"]
 testpaths = ["tests"]
 
 [tool.importlinter]
-root_packages = ["correction_layer", "feature_extraction"]
+root_packages = ["correction_layer", "feature_extraction", "patch_feature_store"]
 include_external_packages = true
 
 [[tool.importlinter.contracts]]
@@ -167,3 +167,70 @@ layers = [
     "feature_extraction.boundary.timm_backbone | feature_extraction.boundary.anomalib_source",
     "feature_extraction.boundary.backbone_identity",
 ]
+
+[[tool.importlinter.contracts]]
+name = "patch_feature_store の層の依存方向（外側から内側のみ）"
+type = "layers"
+layers = [
+    "patch_feature_store.engine",
+    "patch_feature_store.boundary | patch_feature_store.catalog",
+    "patch_feature_store.model",
+]
+
+[[tool.importlinter.contracts]]
+name = "catalog 内のモジュールは互いに独立（engine が合成）"
+type = "independence"
+modules = [
+    "patch_feature_store.catalog.registry",
+    "patch_feature_store.catalog.journal",
+    "patch_feature_store.catalog.admission",
+    "patch_feature_store.catalog.merging",
+    "patch_feature_store.catalog.pruning",
+    "patch_feature_store.catalog.banks",
+]
+
+[[tool.importlinter.contracts]]
+name = "model 内は ports → snapshot → prototype → registration／operations／bank → query → errors → criteria／config／types の一方向"
+type = "layers"
+layers = [
+    "patch_feature_store.model.ports",
+    "patch_feature_store.model.snapshot",
+    "patch_feature_store.model.prototype",
+    "patch_feature_store.model.registration | patch_feature_store.model.operations | patch_feature_store.model.bank",
+    "patch_feature_store.model.query",
+    "patch_feature_store.model.errors",
+    "patch_feature_store.model.criteria | patch_feature_store.model.config | patch_feature_store.model.types",
+]
+
+[[tool.importlinter.contracts]]
+name = "patch_feature_store の faiss / torch / anomalib は boundary の外で import しない"
+type = "forbidden"
+source_modules = [
+    "patch_feature_store.model",
+    "patch_feature_store.catalog",
+    "patch_feature_store.engine",
+]
+forbidden_modules = ["faiss", "torch", "anomalib"]
+
+[[tool.importlinter.contracts]]
+name = "boundary 内は snapshot_store／faiss_index／anomalib_coreset／clock → snapshot_schema の一方向"
+type = "layers"
+layers = [
+    "patch_feature_store.boundary.snapshot_store | patch_feature_store.boundary.faiss_index | patch_feature_store.boundary.anomalib_coreset | patch_feature_store.boundary.clock",
+    "patch_feature_store.boundary.snapshot_schema",
+]
+
+[[tool.importlinter.contracts]]
+name = "correction_layer / feature_extraction は patch_feature_store を import しない"
+type = "forbidden"
+source_modules = [
+    "correction_layer",
+    "feature_extraction",
+]
+forbidden_modules = ["patch_feature_store"]
+
+[[tool.importlinter.contracts]]
+name = "patch_feature_store は correction_layer を import しない"
+type = "forbidden"
+source_modules = ["patch_feature_store"]
+forbidden_modules = ["correction_layer"]

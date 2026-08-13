@@ -2,7 +2,7 @@
 
 ## 1. 基盤と層契約
 
-- [ ] 1.1 パッケージ骨格と層依存契約を整備する
+- [x] 1.1 パッケージ骨格と層依存契約を整備する
   - `patch_feature_store` パッケージのディレクトリと、設計が列挙する空モジュールを作成する（model / catalog / boundary の各モジュール、空のサブパッケージ公開面、空の合成ルート）
   - `pyproject.toml` の import-linter に `patch_feature_store` を追加する。`root_packages` を 3 パッケージにし、既存の `include_external_packages = true` は維持する
   - 設計の契約 1〜7 を追加する（engine > boundary|catalog > model、catalog 6 モジュールの独立、model の層順、faiss/torch/anomalib の forbidden、boundary アダプタ独立、既存パッケージ → store 禁止、store → correction_layer 禁止）
@@ -176,3 +176,7 @@
   - _Requirements:_ 1.2, 1.4, 5.1, 5.2, 6.2, 7.3, 8.3
   - _Boundary:_ e2e-validation
   - _Depends:_ 6.1
+
+## Implementation Notes
+
+- 1.1: 空モジュール 27 件 + 契約 1〜7。`pytest tests/test_store_skeleton.py` 1 passed、`lint-imports` 16 kept / 0 broken、`pytest` 280 passed。completion=`VERIFIED`。

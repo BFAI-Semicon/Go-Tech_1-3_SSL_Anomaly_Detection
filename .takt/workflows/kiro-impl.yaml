@@ -96,12 +96,12 @@ steps:
         - name: kiro-implementation-dispatch.md
           format: kiro-implementation-result
     rules:
-      - condition: STATUS READY_FOR_REVIEW and dispatch_mode wave and wave_tasks emitted
+      - condition: STATUS READY_FOR_REVIEW and dispatch_mode single
+        next: plan-one-task
+      - condition: STATUS READY_FOR_REVIEW and dispatch_mode wave and wave_tasks lists two or more eligible task ids
         next: prepare-task-wave
       - condition: STATUS READY_FOR_REVIEW and dispatch_mode wave_apply and wave_result_refs emitted
         next: apply-wave-task
-      - condition: STATUS READY_FOR_REVIEW and dispatch_mode single
-        next: plan-one-task
       - condition: STATUS BLOCKED and selected task exists and blocker_note_required true
         next: update-progress
       - condition: STATUS BLOCKED and no selected task or readiness gate failed
@@ -139,6 +139,8 @@ steps:
         next: execute-task-wave
       - condition: STATUS BLOCKED and selected task exists and blocker_note_required true
         next: update-progress
+      - condition: STATUS BLOCKED and dispatch_mode is not wave and no wave worktree was created
+        next: plan-one-task
       - condition: STATUS BLOCKED
         next: ABORT
       - condition: STATUS NEEDS_CONTEXT
