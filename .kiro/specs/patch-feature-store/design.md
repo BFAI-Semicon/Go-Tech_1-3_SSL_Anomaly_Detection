@@ -169,7 +169,8 @@ src/patch_feature_store/
 │                                #   SnapshotRepository, Clock
 ├── catalog/
 │   ├── __init__.py              # 空
-│   ├── registry.py              # PrototypeRegistry。id 発番・生存状態・対応表・解決・寄与の保持
+│   ├── registry.py              # PrototypeRegistry, RegistryChange。id 発番・生存状態・
+│   │                            #   対応表・解決・寄与の保持（plan と apply を分離）
 │   ├── journal.py               # OperationJournal。登録記録と間引き記録の追記・期間照会・
 │   │                            #   ドメイン／由来キーによる登録記録の絞り込み
 │   ├── admission.py             # 受け入れ検査と正規化（担保根拠・供給ラベル・次元・
@@ -194,11 +195,11 @@ tests/
 │                                #   受け入れと拒否報告
 ├── test_store_merging.py        # 集約判定としきい値境界、集約後レコードの合成規則
 ├── test_store_pruning.py        # expiry 判定、保護区分、上限の充足可能性
-├── test_store_registry.py       # id 発番・retire・対応表・解決・寄与の併合
+├── test_store_registry.py       # id 発番・retire・対応表・解決・寄与の併合、plan と apply の分離
 ├── test_store_journal.py        # 操作記録の追記・期間照会・登録記録の絞り込み
 ├── test_store_banks.py          # 候補抽出・除外・不足報告・決定性・構成条件
 ├── test_store_faiss_index.py    # 追加・削除・セレクタ検索・k 超過・再構成
-├── test_store_snapshot.py       # 永続化の往復と整合検査の失敗報告
+├── test_store_snapshot.py       # 永続化の往復、整合検査の失敗報告、差し替え中断からの復旧
 ├── test_store_engine.py         # 登録・検索・問い合わせ・間引き・バンクの結合
 ├── test_store_properties.py     # hypothesis: id 非再利用・対応表の終端性・バンク決定性
 └── test_store_e2e.py            # anomalib coreset を含む通し（登録→間引き→永続化→再読込→検索）
@@ -219,7 +220,7 @@ tests/
 - 境界の構築口: `faiss_flat_index`、`anomalib_coreset_selector`、`directory_snapshot_repository`、`utc_clock`
 - 例外: `PatchFeatureStoreError`、`EmbeddingDimensionMismatchError`、`NormalityEvidenceRequiredError`、`ExtractorIdentityMismatchError`、`SnapshotIntegrityError`、`CoresetSizeLimitError`、`BankSizeUnavailableError`、`UnknownBankError`
 
-公開メソッドのシグネチャと公開例外の属性に現れる型は、union alias も含めて公開する。`PrototypeResolution` は `resolve` / `describe` の戻り値、`OperationLogEntry` は `operations` の戻り値、`NormalityEvidence` は `RegistrationRequest.evidence` と `RegistrationRecord.evidence`、`IdentityMismatch` は `ExtractorIdentityMismatchError.mismatches` の要素型である（要件 6.4、6.5 の報告要素）。
+公開メソッドのシグネチャと公開例外の属性に現れる型は、union alias も含めて公開する。`PrototypeResolution`（と構成要素の `LivePrototype`・`MergedPrototype`・`PrunedPrototype`・`UnknownPrototype`）は `resolve` の戻り値、`PrototypeView` は `describe` の戻り値、`OperationLogEntry` は `operations` の戻り値、`NormalityEvidence` は `RegistrationRequest.evidence` と `RegistrationRecord.evidence`、`IdentityMismatch` は `ExtractorIdentityMismatchError.mismatches` の要素型である（要件 6.4、6.5 の報告要素）。`PrototypeView.resolution` が `PrototypeResolution` を持つため、`describe` の利用者も解決状態の型に触れる。
 
 `PrototypeRegistry`・`OperationJournal`・`BankRegistry`・`FaissFlatIndex` と `catalog` の純関数は公開しない。これらは `PatchFeatureStore` が内部で合成する台帳と手順であり、外部から直接触れると台帳とベクトル索引の同期不変条件を迂回できてしまう。境界の構築口をファクトリ関数で公開する方針は `feature_extraction` に揃える（具象クラス名を公開面の契約にしない。`.kiro/steering/structure.md:46-47`）。
 
@@ -239,6 +240,7 @@ tests/
   - 契約 4（forbidden）: source に `patch_feature_store.model`・`patch_feature_store.catalog`・`patch_feature_store.engine`、forbidden に `faiss`・`torch`・`anomalib`。
   - 契約 5（layers）: `boundary.snapshot_store` > `boundary.snapshot_schema | boundary.faiss_index | boundary.anomalib_coreset | boundary.clock`。
   - 契約 6（forbidden）: source に `correction_layer`・`feature_extraction`、forbidden に `patch_feature_store`。パッケージ間の依存方向を一方向に固定する。
+  - 契約 7（forbidden）: source に `patch_feature_store`、forbidden に `correction_layer`。契約 6 は既存パッケージ → store の向きだけを禁止するため、`correction_layer` との相互依存を作らないという宣言（「許可された依存」）を CI で担保するにはこの向きの契約も要る。`feature_extraction` への依存は許可するため forbidden に含めない。
   - 契約の追加は、列挙するモジュールがすべて存在してから行う。`LayersContract` は非 optional の層モジュールがグラフに無いと `Missing layer` で失敗する（`feature_extraction` 追加時に確認済みの挙動）。
 - `src/` 配下の既存パッケージ、`docs/`、`.kiro/steering/` は変更しない。
 
@@ -264,8 +266,11 @@ sequenceDiagram
     Idx-->>Store: クエリごとの最近傍 id と距離
     Store->>Mrg: しきい値で新規追加と集約に振り分ける
     Mrg-->>Store: 新規レコード群と集約後レコード群
-    Store->>Reg: 新 id 発番、集約前 id の retire と対応表登録
-    Store->>Idx: remove(集約前 id) と add(新規 id と集約後 id)
+    Store->>Reg: plan_registration（id を確定するが台帳は変更しない）
+    Reg-->>Store: RegistryChange
+    Store->>Idx: add(新規 id と集約後 id)
+    Store->>Idx: remove(集約前 id)
+    Store->>Reg: apply(RegistryChange)
     Store->>Jrn: 登録記録の追記
     Store-->>Caller: RegistrationOutcome
 ```
@@ -277,22 +282,28 @@ sequenceDiagram
 ```mermaid
 graph TB
     Query[NormalSearchQuery]
-    Bank{bank_id 指定あり}
-    Domain{ドメイン限定あり}
-    Include[IncludeIds 候補 id の共通部分]
+    Any{domain または bank_id の指定あり}
+    BankIds[bank_id 指定時 バンクのメンバー id]
+    DomainIds[domain 指定時 条件に一致する生存 id]
+    Intersect[指定された条件の共通部分]
+    Include[IncludeIds 共通部分から defect を除く]
     Exclude[ExcludeIds defect の生存 id]
     Search[VectorIndex search]
 
-    Query --> Bank
-    Bank -- yes --> Include
-    Bank -- no --> Domain
-    Domain -- yes --> Include
-    Domain -- no --> Exclude
+    Query --> Any
+    Any -- yes --> BankIds
+    Any -- yes --> DomainIds
+    BankIds --> Intersect
+    DomainIds --> Intersect
+    Intersect --> Include
+    Any -- no --> Exclude
     Include --> Search
     Exclude --> Search
 ```
 
-限定指定がない既定経路では、登録済み正常集合の全体を単一プールとして扱い、`kind=defect` の生存 id だけを除外するセレクタを渡す。`defect` は件数が少ない前提であり（`versioning-model.md:59`）、包含リストを毎回組むより除外リストの方が小さい。バンクまたはドメイン限定がある場合は、条件に一致する生存 id から `defect` を除いた包含リストを渡す。
+限定指定がない既定経路では、登録済み正常集合の全体を単一プールとして扱い、`kind=defect` の生存 id だけを除外するセレクタを渡す。`defect` は件数が少ない前提であり（`versioning-model.md:59`）、包含リストを毎回組むより除外リストの方が小さい。
+
+`domain` と `bank_id` は独立に指定でき、両方が指定された場合は**両条件を満たす交差**を検索対象にする。どちらか一方を優先して他方を無視することはしない。要件 3.6 のドメイン限定にバンクの例外はなく、要件 7.3 のバンク指定にドメインの例外もないため、両立させる解釈は交差だけである。指定された条件ごとに候補 id 集合を作り、その共通部分から `defect` を除いた包含リストを渡す。交差が空集合になる指定は不正ではなく、空の検索結果として返す（`k` 未満の返却は要件 3.2 の経路と同じ）。
 
 ### 間引き（coreset 再選択と expiry）
 
@@ -307,7 +318,9 @@ graph TB
     Zero{選択件数 >= 1}
     Sel[CoresetSelector で残す行を選ぶ]
     DropAll[選択可能群を全件除外]
-    Rem[VectorIndex remove と Registry の除外]
+    Plan[plan_prune で RegistryChange を確定]
+    Rem[VectorIndex remove]
+    App[Registry apply で除外を反映]
     Log[OperationJournal に間引き記録]
 
     Req --> Part
@@ -318,9 +331,11 @@ graph TB
     Fits -- yes --> Zero
     Zero -- yes --> Sel
     Zero -- no --> DropAll
-    Sel --> Rem
-    DropAll --> Rem
-    Rem --> Log
+    Sel --> Plan
+    DropAll --> Plan
+    Plan --> Rem
+    Rem --> App
+    App --> Log
 ```
 
 保護群は「間引き保護の指定を持つプロトタイプ」と「`kind=defect` のプロトタイプ」の和である。選択件数は `上限 − 保護群件数` であり、`CoresetSelector.select` の事前条件が `1 <= size <= len(vectors)` であることから、境界の扱いは次の 4 通りに分かれる。
@@ -340,7 +355,7 @@ selector を呼ぶのは最後の 1 通りだけであり、事前条件 `1 <= s
 - 1.2 — 登録の入口は `register` の 1 つだけで、初期構築と追加を区別する引数を持たない。担保根拠の種別（`DatasetEvidence` / `HumanVerificationEvidence`）だけが異なる。
 - 1.3 — `register` は既存の生存 id に触れず、新規 id の追加と集約対象の差し替えだけを `VectorIndex` に反映する（再登録を要求しない）。
 - 1.4 — `catalog/merging.py` がバッチ最近傍距離としきい値を比較し、集約後レコードを合成する。ドメインは寄与の併合により和集合となる。`RegistrationOutcome.prototype_ids` に集約後 id が入る。
-- 1.5 — `PrototypeRegistry.merge` が集約前 id → 集約後 id を対応表に記録し、`resolve` が集約前 id の指定で `MergedPrototype(merged_into=...)` を返す。
+- 1.5 — `PrototypeRegistry.plan_registration` が集約前 id → 集約後 id の対応を `RegistryChange` に確定し、`apply` が対応表へ反映する。`resolve` は集約前 id の指定で `MergedPrototype(merged_into=...)` を返す。
 - 1.6 — 集約前 id は `VectorIndex.remove` で検索対象から外れ、id 発番は発番済み最大値 + 1 の単調増加であるため再割り当てされない。発番済み id のレコードは削除しない。
 - 1.7 — `catalog/admission.py` が登録済み埋め込み次元と要求の次元を比較し、`EmbeddingDimensionMismatchError(expected_dim, actual_dim)` を送出する（索引へは何も追加しない）。
 - 1.8 — 本 spec の境界外に特徴生成を置き、`register` の入力は上流が生成した `PatchFeatureSet` に限る。
@@ -362,7 +377,7 @@ selector を呼ぶのは最後の 1 通りだけであり、事前条件 `1 <= s
 - 3.3 — `similarities` は `SimilarityQuery.prototype_ids` を `PrototypeRegistry.resolve` で解決し、生存しているものについて種別を問わずコサイン類似度を返す。
 - 3.4 — 解決結果が `MergedPrototype` の id は `SimilarityLookup.merged` に対応先 id とともに載せ、読み替えは行わない。残りの id の結果は返す。
 - 3.5 — `UnknownPrototype` と `PrunedPrototype` は `SimilarityLookup.unresolved` に載せる。残りの id の結果は返す。
-- 3.6 — `NormalSearchQuery.domain` が指定された場合、`OperationJournal.registration_ids_matching` と `PrototypeRegistry.live_ids_with_registrations` で候補 id を求め、包含セレクタで検索対象を限定する。
+- 3.6 — `NormalSearchQuery.domain` が指定された場合、`OperationJournal.registration_ids_matching` と `PrototypeRegistry.live_ids_with_registrations` で候補 id を求め、包含セレクタで検索対象を限定する。`bank_id` と同時に指定された場合も両条件の交差に限定し、ドメイン限定を飛ばさない（要件 3.6 にバンクの例外はない）。
 - 3.7 — `domain` と `bank_id` がいずれも未指定なら、`defect` を除いた生存集合全体を単一プールとして検索する。
 - 3.8 — 追記で集約されなかったプロトタイプは id も索引エントリも変更されないため、追記前と同一 id で返る。
 
@@ -377,7 +392,7 @@ selector を呼ぶのは最後の 1 通りだけであり、事前条件 `1 <= s
 
 ### Requirement 5: coreset 再選択と expiry 間引きによるサイズ上限の維持
 
-- 5.1 — `reselect_coreset(size_limit)` が `CoresetSelector` で残す集合を選び、選ばれなかった id を `VectorIndex.remove` と `PrototypeRegistry.prune` で除外する。selector を呼ぶのは `1 <= 選択件数 < 選択可能群件数` のときだけである（「間引き（coreset 再選択と expiry）」の 4 分岐）。
+- 5.1 — `reselect_coreset(size_limit)` が `CoresetSelector` で残す集合を選び、選ばれなかった id を `VectorIndex.remove` と `PrototypeRegistry.plan_prune` / `apply` で除外する。selector を呼ぶのは `1 <= 選択件数 < 選択可能群件数` のときだけである（「間引き（coreset 再選択と expiry）」の 4 分岐）。
 - 5.2 — `prune_expired()` が `Clock.now()` を基準に失効済みの生存プロトタイプを除外する。
 - 5.3 — `catalog/pruning.py` が `pinned` を保護群に入れ、coreset・expiry のいずれでも除外対象にしない。
 - 5.4 — `kind=defect` は coreset の保護群に含める（expiry の対象からは外さない）。
@@ -387,7 +402,7 @@ selector を呼ぶのは最後の 1 通りだけであり、事前条件 `1 <= s
 
 ### Requirement 6: 永続化・再読込と抽出器同一性の互換判定
 
-- 6.1 — `save()` が `StoreSnapshot`（ベクトル・生存 id・全プロトタイプレコード・対応表・操作記録・抽出器同一性）を `SnapshotRepository` へ渡す。除外状態は「レコードは存在するが生存 id に無い」ことで表現する。
+- 6.1 — `save()` が `StoreSnapshot`（ベクトル・生存 id・全プロトタイプレコード・対応表・操作記録・抽出器同一性）を `SnapshotRepository` へ渡す。除外状態は「レコードは存在するが生存 id に無い」ことで表現する。書き込みはステージング後のディレクトリ差し替えで行い、中断時も完全な世代だけが残る（`DirectorySnapshotRepository`）。
 - 6.2 — Flat 索引は保存した float32 ベクトルから決定的に再構築されるため、同一クエリに同一結果を返す。
 - 6.3 — 初回登録で採用した `ExtractorIdentity`（バックボーン名・重みリビジョン・前処理条件・埋め込み次元・パッチストライドを含む全フィールド）をスナップショットに含める。
 - 6.4 — `catalog/admission.py` が登録要求の同一性メタを全フィールド比較し、不一致を `ExtractorIdentityMismatchError(mismatches)` に列挙して送出する。
@@ -398,7 +413,7 @@ selector を呼ぶのは最後の 1 通りだけであり、事前条件 `1 <= s
 
 - 7.1 — `build_bank(spec)` が `BankSpec.include` に一致する生存プロトタイプから `BankSpec.size` 件を選ぶ。
 - 7.2 — `BankSpec.exclude` に一致する由来キーを 1 つでも持つプロトタイプは候補から外す（集約により複数の由来キーを持つ場合も、いずれかが一致すれば除外する）。
-- 7.3 — `BankRegistry` が bank_id をキーに複数のバンクを保持し、`NormalSearchQuery.bank_id` で対象を指定できる。
+- 7.3 — `BankRegistry` が bank_id をキーに複数のバンクを保持し、`NormalSearchQuery.bank_id` で対象を指定できる。`domain` と併用された場合は両条件の交差が対象になる（「検索対象の決定」）。
 - 7.4 — 候補 id を昇順に並べ、`numpy.random.default_rng(spec.seed)` で非復元抽出する。同一仕様・同一ストア状態なら同一集合になる。
 - 7.5 — 候補が `size` に満たない場合は `BankSizeUnavailableError(bank_id, requested_size, available_count)` を送出し、バンクを作らない。
 - 7.6 — `BankComposition(spec, member_ids, patch_count)` を保持し、`bank_composition(bank_id)` で参照できる。`patch_count` は構成プロトタイプの寄与パッチ数の合計。
@@ -475,14 +490,19 @@ class Clock(Protocol):
 - 発番済み id を減らさない。id は発番済み最大値 + 1 の単調増加で払い出す。
 - 生存集合・対応表・除外の 3 状態を相互排他に保つ。生存 id は対応表に現れず、対応表の鍵は生存集合に現れない。
 - レコードは発番済みの全 id について保持し続ける（除外・集約後も削除しない）。
+- 状態変更は `apply` だけが行う。`plan_registration` と `plan_prune` は識別子を確定した `RegistryChange` を返すだけで、台帳を変更しない（`PatchFeatureStore` の「準備 → コミット」を成立させるため）。`apply` は辞書更新だけで例外を送出しない。
 
 ##### 主なインターフェース (PrototypeRegistry)
 
 ```python
 class PrototypeRegistry:
-    def issue(self, records: Sequence[PrototypeDraft]) -> tuple[PrototypeRecord, ...]: ...
-    def merge(self, retired_ids: Sequence[int], draft: PrototypeDraft) -> PrototypeRecord: ...
-    def prune(self, prototype_ids: Sequence[int]) -> None: ...
+    def plan_registration(
+        self,
+        new_drafts: Sequence[PrototypeDraft],
+        merges: Sequence[tuple[Sequence[int], PrototypeDraft]],
+    ) -> RegistryChange: ...
+    def plan_prune(self, prototype_ids: Sequence[int]) -> RegistryChange: ...
+    def apply(self, change: RegistryChange) -> None: ...
     def resolve(self, prototype_ids: Sequence[int]) -> dict[int, PrototypeResolution]: ...
     def record(self, prototype_id: int) -> PrototypeRecord | None: ...
     def live_ids(self) -> tuple[int, ...]: ...
@@ -492,6 +512,8 @@ class PrototypeRegistry:
     def snapshot_records(self) -> tuple[PrototypeRecord, ...]: ...
     def merged_into(self) -> dict[int, int]: ...
 ```
+
+`RegistryChange` は発番済みレコード群・retire する id と対応先・除外する id を持つ確定済みの差分である。`PatchFeatureStore` は `plan_*` の戻り値から `RegistrationOutcome.prototype_ids` と `retired_prototype_ids`、索引へ渡す id とベクトルを組み立てる。
 
 `selection_for` は、包含 id 数が生存件数の半分を超える場合に `ExcludeIds`（補集合）へ切り替える。ID セレクタの構築費用が対象件数に比例するためで、既定の正常集合検索（`defect` だけを除く）を小さなセレクタで処理する経路がこれに当たる。
 
@@ -667,7 +689,9 @@ def anomalib_coreset_selector() -> CoresetSelector: ...
 def directory_snapshot_repository(store_dir: Path) -> SnapshotRepository: ...
 ```
 
-- 書き込みは同一ディレクトリ内の一時ファイルへ出力してから `os.replace` で差し替え、途中終了で半端な状態を残さない。
+- 書き込みはステージングディレクトリ `<store_dir>.staging/` に 6 ファイルすべてを出力してから、ディレクトリ単位で差し替える。ファイルごとの `os.replace` は使わない（6 ファイルの一部だけが新しい状態になりうるため）。
+- 差し替えの順序は「既存 `store_dir` を `<store_dir>.previous/` へ改名 → `staging` を `store_dir` へ改名 → `previous` を削除」である。どの時点で中断しても、完全な世代が `store_dir` か `previous` のいずれかに残る。
+- 読み込み時に `store_dir` が存在せず `previous` が残っている場合は、直前の差し替えが中断したものとして `previous` を `store_dir` へ戻してから読み込む。`staging` が残っている場合は不完全な書き込みとして削除する。
 - 読み込みは pydantic（`extra="forbid"`）で各ファイルを検証したうえで、相互整合を検査する。失敗は `SnapshotIntegrityError(target, reason)`。
 - 検査項目: JSON / JSONL のパース、ベクトルの dtype（float32）・次元・有限性、`live_ids` と行数の一致、`live_ids` の重複、生存 id のレコード存在、対応表の鍵と値のレコード存在、生存集合と対応表の重複、`prototypes.jsonl` の id 重複、抽出器同一性メタと埋め込み次元の一致。
 
@@ -731,13 +755,16 @@ class PatchFeatureStore:
 
 - 台帳（`PrototypeRegistry`）とベクトル索引（`VectorIndex`）の同期を担う唯一の場所。`register`・`reselect_coreset`・`prune_expired`・`restore` の 4 経路でのみ両者を更新する。
 - 現在時刻の取得は `Clock` に一本化し、`catalog` へは解決済みの `datetime` を渡す。
-- 例外が送出される場合、索引と台帳のいずれも変更しない（検査は変更の前に完了する）。
+- 状態を変える 3 経路（`register`・`reselect_coreset`・`prune_expired`）は「準備 → コミット」の 2 段で実行する。準備段は検査・最近傍検索・集約計画・間引き対象の決定・識別子の確定までを行い、台帳とジャーナルを変更しない。確定結果は `RegistryChange` として保持する。
+- コミット段の順序は索引 → 台帳 → ジャーナルである。台帳の反映（`apply`）とジャーナル追記は辞書とリストの更新だけで、例外を送出しない。したがって索引更新が失敗した時点で処理を止めれば、台帳とジャーナルは要求前の状態のままになる。
+- 例外が送出される場合、索引と台帳のいずれも要求前の状態で一致する。`register` は `add`（新規 id と集約後 id）→ `remove`（集約前 id）の順に索引を更新し、`add` が失敗したときは何も反映せずに送出し、`remove` が失敗したときは直前に `add` した id を取り消してから送出する。間引きは `remove` だけなので取り消しを要しない。
+- 準備段で確定した識別子は `apply` までの間に他の操作へ払い出されない。本パッケージは単一スレッドでの逐次利用を前提とし、並行呼び出しの排他は持たない。
 - `describe`・`find_prototypes`・`resolve`・`operations`・`bank_composition` は台帳への委譲と合成だけで、追加の判断を持たない。
 
 ##### 実装メモ (PatchFeatureStore)
 
 - `restore` は `repository.load()` の結果で台帳を再構成し、`index.add(live_ids, vectors)` を 1 回だけ呼ぶ。
-- `search_normal` は `bank_id` 指定時に `BankRegistry.member_ids` と生存集合の共通部分を取り、`kind=defect` を除いてから包含セレクタを作る。
+- `search_normal` は指定された限定条件ごとに候補 id 集合を作る（`bank_id` は `BankRegistry.member_ids` と生存集合の共通部分、`domain` は `OperationJournal.registration_ids_matching` と `PrototypeRegistry.live_ids_with_registrations`）。両方が指定された場合はその交差を取り、`kind=defect` を除いてから包含セレクタを作る。
 - `similarities` は解決済みの生存 id についてのみ `VectorIndex.reconstruct` を呼び、正規化済みクエリとの内積を取る。
 - `PruneOutcome(operation, pruned_prototype_ids)` を返し、同じ内容を `OperationJournal` へ追記する。
 
@@ -796,6 +823,20 @@ class HumanVerificationEvidence:
 
 
 NormalityEvidence = DatasetEvidence | HumanVerificationEvidence
+
+
+@dataclass(frozen=True)
+class DomainCriteria:  # 軸ごとの値集合。空集合は無指定（何にでも一致）
+    process: frozenset[str] = frozenset()
+    material: frozenset[str] = frozenset()
+    equipment: frozenset[str] = frozenset()
+
+
+@dataclass(frozen=True)
+class ProvenanceCriteria:  # 軸は ProvenanceKeys に対応
+    wafer_id: frozenset[str] = frozenset()
+    lot_id: frozenset[str] = frozenset()
+    captured_on: frozenset[date] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -869,7 +910,7 @@ class NormalSearchQuery:
     k: int                           # 要件 3.1 の近傍数
     identity: ExtractorIdentity
     domain: DomainCriteria | None    # None はドメイン限定なし（要件 3.7）
-    bank_id: str | None              # None はバンク限定なし
+    bank_id: str | None              # None はバンク限定なし。domain との併用は交差
 
     def __post_init__(self) -> None:
         # k >= 1 はこの型の不変条件。逸脱は ValueError
@@ -915,6 +956,44 @@ class PrototypeDraft:  # 識別子未発番のプロトタイプ。ベクトル�
 
 
 @dataclass(frozen=True)
+class LivePrototype:  # 生存。索引の検索対象に含まれる
+    pass
+
+
+@dataclass(frozen=True)
+class MergedPrototype:  # 集約により retire
+    merged_into: int  # 対応表を終端まで辿った生存識別子
+
+
+@dataclass(frozen=True)
+class PrunedPrototype:  # 間引きで除外。対応先を持たない
+    pass
+
+
+@dataclass(frozen=True)
+class UnknownPrototype:  # 未発番
+    pass
+
+
+PrototypeResolution = LivePrototype | MergedPrototype | PrunedPrototype | UnknownPrototype
+
+
+@dataclass(frozen=True)
+class PrototypeContributionView:
+    position: tuple[int, int]         # 元画像座標 (top, left)
+    registration: RegistrationRecord  # 寄与元の登録記録（要件 4.1、4.2 のメタデータ）
+
+
+@dataclass(frozen=True)
+class PrototypeView:
+    kind: PrototypeKind
+    pinned: bool
+    expires_at: datetime | None
+    resolution: PrototypeResolution
+    contributions: tuple[PrototypeContributionView, ...]
+
+
+@dataclass(frozen=True)
 class PruneOutcome:
     operation: PruneOperation
     pruned_prototype_ids: tuple[int, ...]
@@ -927,9 +1006,11 @@ class IdentityMismatch:
     actual: object
 ```
 
-補助型のうち、`catalog` の純関数が返す結果型は各モジュールに置く。`admission.AcceptedRegistration`（正規化済みベクトル・採用する同一性メタ・採用する split・寄与の素材）、`merging.MergePlan`（新規追加するクエリ行と、集約先ごとにまとめたクエリ行）、`pruning.CoresetPartition`（保護群・選択可能群・選択件数）である。いずれも生成元のモジュールと 1 対 1 で、他の `catalog` モジュールからは参照しない。
+補助型のうち、`catalog` が返す結果型は各モジュールに置く。`admission.AcceptedRegistration`（正規化済みベクトル・採用する同一性メタ・採用する split・寄与の素材）、`merging.MergePlan`（新規追加するクエリ行と、集約先ごとにまとめたクエリ行）、`pruning.CoresetPartition`（保護群・選択可能群・選択件数）、`registry.RegistryChange`（発番済みレコード・retire の対応・除外 id）である。いずれも生成元のモジュールと 1 対 1 で、他の `catalog` モジュールからは参照しない。
 
-`DomainCriteria` と `ProvenanceCriteria` は軸ごとの値集合を持ち、空集合の軸を「無指定（何にでも一致）」とする。値が `None` のタグは、その軸が無指定のときだけ一致する。両者は検索時のドメイン限定（要件 3.6）、メタデータ絞り込み（要件 4.4）、バンクの包含・除外（要件 7.1、7.2）で共通に使う。
+`DomainCriteria` と `ProvenanceCriteria` の軸は上流の `DomainTags`（工程・材料・装置）と `ProvenanceKeys`（ウェハ ID・ロット ID・撮像日）に 1 対 1 で対応する。空集合の軸は「無指定（何にでも一致）」であり、値が `None` のタグはその軸が無指定のときだけ一致する。両者は検索時のドメイン限定（要件 3.6）、メタデータ絞り込み（要件 4.4）、バンクの包含・除外（要件 7.1、7.2）で共通に使う。
+
+`describe` と `resolve` の戻り値は識別子を鍵とする辞書であり、識別子自体は値の側に持たない。`describe` は発番済み識別子だけを鍵に持ち（集約・間引き済みも含む。状態は `PrototypeView.resolution` が示す）、未発番の識別子は鍵に現れない。未発番かどうかの判定は `resolve` の `UnknownPrototype` で行う。
 
 クエリ型から索引への経路は次のとおりである。`search_normal` は `NormalSearchQuery.embedding` と `identity` を `accept_query` に渡して正規化済みベクトルを得たうえで、`domain` / `bank_id` から `IdSelection` を組み、`VectorIndex.search(queries=正規化済みベクトルを (1, D) に整形, k=query.k, selection=...)` を呼び、返るタプルの先頭を戻り値とする。`similarities` は `prototype_ids` の解決結果と `reconstruct` の結果に対して正規化済みベクトルの内積を取る。
 
@@ -946,6 +1027,8 @@ class IdentityMismatch:
 ├── merged_into.json          # 集約前識別子 → 集約後識別子の対応表
 └── journal.jsonl             # 1 行 1 操作記録（登録記録と間引き記録）
 ```
+
+- `<store_dir>.staging/` と `<store_dir>.previous/` は差し替えの途中だけ存在する作業ディレクトリであり、正常終了後は残らない。
 
 - 除外状態は独立したフィールドを持たない。`prototypes.jsonl` に存在し `live_ids.npy` にも `merged_into.json` にも現れない識別子が「間引きで除外済み」である。
 - 次の識別子は保存しない。発番済み識別子は削除されないため、`prototypes.jsonl` と `journal.jsonl` の最大値 + 1 で復元できる。
@@ -982,7 +1065,7 @@ class IdentityMismatch:
 - `admission`: 担保根拠と種別の整合（`acceptable` にデータセット由来を渡すと拒否）、`kind=normal` かつ `DatasetEvidence` で `features.image_label=ANOMALOUS` の要求が `NormalityEvidenceRequiredError` で拒否され索引と台帳が変わらないこと、同条件で `image_label=NORMAL` なら受理されること、`HumanVerificationEvidence` では `image_label=ANOMALOUS` でも `image_label` を理由に拒否しないこと、次元不一致の報告内容、同一性メタの複数項目不一致がすべて列挙されること、ゼロノルム・非有限値の拒否、正規化後のノルムが 1 であること、`AcceptedRegistration.split` が `features.split` と一致すること。
 - `merging`: しきい値の等号境界で集約になること、同一の既存プロトタイプを最近傍とする複数クエリが 1 件へまとまること、重心が寄与数で重み付けされること、保護属性の論理和と、失効期限がより遅い方（`None` を最も遅いものとして扱う）になること。
 - `pruning`: `pinned` と `kind=defect` が coreset の保護群に入ること、`kind=defect` が expiry では除外されること、`partition_for_coreset` が受け取った `size_limit` と保護群件数から選択件数を算出すること、保護群件数が上限を超える場合に充足不能と判定されること、保護群件数が上限と等しい場合は充足可能と判定され選択件数が 0 になること、選択件数が選択可能群件数以上になる区分を判別できること。
-- `registry`: 集約・間引き後に識別子が再利用されないこと、対応表の連鎖が終端まで解決されること、3 状態が相互排他であること、`selection_for` が包含・除外を切り替えること。
+- `registry`: 集約・間引き後に識別子が再利用されないこと、対応表の連鎖が終端まで解決されること、3 状態が相互排他であること、`selection_for` が包含・除外を切り替えること、`plan_registration` / `plan_prune` の呼び出しだけでは生存集合・対応表が変わらず `apply` で初めて反映されること。
 - `journal`: 期間照会が昇順で登録記録と間引き記録の双方を返すこと、ドメイン・由来キーの絞り込みが軸ごとの無指定を正しく扱うこと。
 - `banks`: 除外由来キーを 1 つでも持つプロトタイプが候補から外れること、不足時に `BankSizeUnavailableError` が `bank_id`・`requested_size`・`available_count` の 3 属性を保持して失敗すること、同一シードで同一集合になること、`patch_count` が寄与数の合計になること。
 - `criteria`: 値が `None` のタグが、無指定軸にだけ一致すること。
@@ -992,7 +1075,7 @@ class IdentityMismatch:
 
 ### 依存契約（CI）
 
-- `lint-imports` が契約 1〜6 を検査する。契約 3 は同一層の `|` が independent 指定である（同一層同士の import も禁止）ため、`model.prototype` → `model.operations`、`model.errors` → `model.types`、`model.query` → `model.criteria` の各依存が層順で解けていることをこの検査で担保する。
+- `lint-imports` が契約 1〜7 を検査する。契約 6 と 7 の対で `correction_layer` との相互依存が双方向とも検出される。契約 3 は同一層の `|` が independent 指定である（同一層同士の import も禁止）ため、`model.prototype` → `model.operations`、`model.errors` → `model.types`、`model.query` → `model.criteria` の各依存が層順で解けていることをこの検査で担保する。
 
 ### Property Tests（hypothesis）
 
@@ -1007,7 +1090,9 @@ class IdentityMismatch:
 - 保護なし・失効期限 `T1` の既存プロトタイプへ `pinned=True` と `expires_at=T2`（`T2 > T1`）を指定した登録要求が集約されたとき、集約後プロトタイプが `pinned=True` と `expires_at=T2` を持つこと（要件 1.4）。`RegistrationRequest` の保護属性・失効期限が `merged_draft` へ届く配線を、併合規則（保護属性は論理和、失効期限はより遅い方）に沿って検証する。
 - `kind=defect` が `search_normal` に現れず、`similarities` では返ること（要件 2.6、3.3）。
 - ドメイン限定あり・なしで検索対象が変わること（要件 3.6、3.7）と、`k` が件数を超えた場合に全件が返ること（要件 3.2）。
-- 永続化→再読込後に、保存前と同一クエリで同一の識別子列と距離が返ること（要件 6.2）。壊した保存内容（行数不一致・次元不一致・対応表の参照先欠落）で `SnapshotIntegrityError` になること（要件 6.6）。
+- `domain` と `bank_id` を同時に指定した検索が両条件の交差だけを返すこと（要件 3.6、7.3）。バンクのメンバーでもドメイン条件に一致しないプロトタイプが結果に現れず、交差が空なら空結果になる。
+- `add` で失敗する代替 `VectorIndex` を注入した `register` が例外を送出したとき、生存 id 集合・対応表・操作記録が要求前と一致すること。`remove` で失敗する場合は追加済み id が索引から取り消され、生存 id 集合と索引の id 集合が一致したままであること（「責務と制約 (PatchFeatureStore)」の準備 → コミット）。
+- 永続化→再読込後に、保存前と同一クエリで同一の識別子列と距離が返ること（要件 6.2）。壊した保存内容（行数不一致・次元不一致・対応表の参照先欠落）で `SnapshotIntegrityError` になること（要件 6.6）。`store_dir` が無く `<store_dir>.previous/` だけが残る状態から、差し替え中断として復旧して読み込めること（要件 6.1、6.2）。
 - 決定的な代替 `CoresetSelector` を注入した `reselect_coreset` で、保護対象が残り、上限が守られ、除外識別子が操作記録に載ること（要件 5.1〜5.6、8.2）。
 - 代替 `CoresetSelector` の呼び出し回数を数えたうえで、`reselect_coreset` の 4 分岐が境界どおりに動くこと（要件 5.1、5.3）。保護群件数 = 上限 + 1 では `CoresetSizeLimitError(protected_count, size_limit)` になり索引と台帳が変わらない。保護群件数 = 上限では例外にならず、selector を呼ばずに選択可能群が全件除外される。生存件数が上限以内では selector を呼ばず何も除外しない。`1 <= 選択件数 < 選択可能群件数` でだけ selector が `1 <= size <= len(vectors)` を満たす引数で 1 回呼ばれる。
 - データセット由来で登録した後の `RegistrationRecord` が `DatasetEvidence.dataset_name` と `features.split` と一致する `split` を保持すること（要件 2.3）。
