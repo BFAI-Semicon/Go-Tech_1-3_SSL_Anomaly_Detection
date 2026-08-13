@@ -1,12 +1,12 @@
 {
   "feature_name": "patch-feature-store",
   "created_at": "2026-08-13T02:09:38Z",
-  "updated_at": "2026-08-13T02:09:38Z",
+  "updated_at": "2026-08-13T03:43:02Z",
   "language": "ja",
-  "phase": "initialized",
+  "phase": "requirements-generated",
   "approvals": {
     "requirements": {
-      "generated": false,
+      "generated": true,
       "approved": false
     },
     "design": {
