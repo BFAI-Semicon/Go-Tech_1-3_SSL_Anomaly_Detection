@@ -6,13 +6,17 @@
 外側はバージョン管理・オントロジー・アプリ合成（`docs/package-dependency-direction.md`）。
 依存は常に内側へ。差し替え点は Protocol（例: `SimilaritySource`・`AxisMatcher`）で逆転する。
 
-実装済みの最初のパッケージ `correction_layer` は次の層に分かれる。
+実装済みパッケージは `correction_layer`（補正レイヤ）と `feature_extraction`（パッチ特徴抽出）。
+両者は同じ層パターンで、中間層の名前だけが関心事に応じて変わる。
 
-- `model` — 型・port・レコード・DomainSet（最内側）
-- `boundary` / `decision` — 互いに独立。model のみに依存
-- `engine` — composition root。具体ストアではなく port を注入される
+- `model` — 型・設定・port（最内側）
+- 中間層 — 互いに独立し model のみに依存（`correction_layer` は `boundary`／`decision`、
+  `feature_extraction` は `boundary`／`geometry`）
+- `engine` — composition root。具体実装ではなく port を注入される
 
-層間・モジュール間の import は `import-linter` で CI 検査する。
+外部 ML ライブラリ（torch／timm／anomalib）は `boundary` の内側だけで import する。
+層間・モジュール間の依存方向とこの禁止規則は `pyproject.toml` の contracts に書き、
+`import-linter` で CI 検査する。
 
 ## Core Technologies
 
@@ -42,6 +46,8 @@
 - 共有契約は pydantic／`StrEnum`／`Protocol`／frozen dataclass
 - 「定義では `any` 可・入力では不可」のような二重契約は型を分ける（例: `DomainAxes` vs `ConcreteDomainAxes`）
 - 公開面で具体実装に固定せず、差し替え seam は Protocol にする
+- 設定モデルは pydantic `extra="forbid"`＋validator で不正値を構築時に拒否する
+- パッケージ間を渡る数値は `np.float32` の C 連続配列。形状は型側に明記する（例: 特徴は `(N, D)`）
 
 ### Code Quality
 
@@ -54,8 +60,16 @@
 ### Testing
 
 - pytest（`pythonpath = ["src"]`、`testpaths = ["tests"]`）
+- テスト関数名は `test_should_...` で期待する振る舞いを述べる
 - 合成 fixture で骨格を検証。決定性・集合等価は hypothesis を使う
+- 実重みが必要な E2E は取得できなければ `pytest.skip`（例: `BackboneUnavailableError`）。
+  数値の再現性は別プロセスで再計算したハッシュ一致で確認する
 - フェーズ完了条件は「動く状態＋pytest」
+
+### CI
+
+`.github/workflows/python-ci.yml` が main への push と PR で ruff → lint-imports → pytest を通す。
+ローカルでも同じ 3 つを揃えてから完了扱いにする。
 
 ## Development Environment
 
@@ -72,6 +86,10 @@ mise run sync        # uv sync --extra llm
 mise run sync-dev    # + pytest / ruff / hypothesis 等
 mise run gpu-check
 mise run lint-md
+
+uv run ruff check .
+PYTHONPATH=src uv run lint-imports
+uv run pytest
 ```
 
 ## Key Technical Decisions
@@ -81,6 +99,8 @@ mise run lint-md
   比較用 DINOv2／DINO／ImageNet CNN はバックボーン名の設定切替。MAE は将来検討
 - **anomalib は特徴抽出・データ読み込み・指標** — ストア・スコア化は自前。依存は PyPI `>=2.6,<3`。
   anomalib の型はアダプタで受けて下流に漏らさない
+- **バックボーン同一性は特徴と一緒に運ぶ** — モデル名・重みリビジョン・前処理条件・埋め込み次元・
+  パッチストライドを解決して出力に添付する。ストアや補正レイヤはこれで互換性を判定する
 - **公開データセットは VisA** — CC BY 4.0（商用可）。CC BY-NC-SA 4.0 の MVTec AD は使わない。
   spec 4 の完了条件は VisA 検証ゲート（`docs/visa-validation-gate.md`）
 - **正常のみの実機データでは AUROC 系を使わない** — 過検出率・安定性・ドメインシフト影響量で

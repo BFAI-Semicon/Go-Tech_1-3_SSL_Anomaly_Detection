@@ -6,16 +6,18 @@
   永続方針は `.kiro/steering/`
 - **パッケージは責務単位** — `src/` に機能パッケージを並べ、依存は内側（判定スキーマ／
   判定ロジック）へ向ける。将来の `versioning`／`ontology`／`app` もこの向きを崩さない
-- **実装は層＋合成** — 各パッケージ内は model（型・port）→ boundary／decision →
-  engine（または app）の一方向。decision モジュール同士は互いに import しない
+- **実装は層＋合成** — 各パッケージ内は model（型・port）→ 中間層 → engine（または app）の
+  一方向。中間層の名前は関心事で決める（判定なら `decision`、幾何計算なら `geometry`、
+  外部 I/O・外部ライブラリなら `boundary`）。同じ中間層のモジュール同士は互いに import しない
 
 ## Directory Patterns
 
 ### Application packages
 
 **Location**: `src/{package}/`  
-**Purpose**: 実行可能な機能単位。現時点の実装例は `correction_layer`  
-**Example**: `model/`・`boundary/`・`decision/`・`engine.py`・公開 `__init__.py`
+**Purpose**: 実行可能な機能単位。実装例は `correction_layer`・`feature_extraction`  
+**Example**: `model/`・`boundary/`・関心事別の中間層（`decision/`／`geometry/`）・`engine.py`・
+公開 `__init__.py`
 
 ### Tests next to contract
 
@@ -41,6 +43,9 @@
 - **パッケージ／モジュール**: snake_case（`correction_layer`、`domain_loader.py`）
 - **型・クラス**: PascalCase（`CorrectionEngine`、`ExactAnyAxisMatcher`）
 - **関数**: snake_case（`load_domain_set`、`judge_primary`）
+- **port 実装の入口**: boundary は snake_case のファクトリ関数で公開し、返り値を Protocol 型で
+  受ける（`timm_patch_extractor`、`visa_image_source`）。具象クラス名は公開面の契約にしない
+- **テスト関数**: `test_should_...`（`test_should_reject_invalid_overlap`）
 - **ドメイン軸・スキーマフィールド**: 設計メモの語彙をそのまま（`element_id`、`prototype_ids`）
 - **spec 名**: kebab-case（`promptable-correction-layer`）
 
@@ -53,8 +58,10 @@ from correction_layer.decision.primary import judge_primary
 ```
 
 - パッケージルートからの絶対 import（`correction_layer...`）を使う
-- `boundary` ⇄ `decision` の相互 import 禁止。配線は `engine`／テスト組み立て側
+- 中間層同士（`boundary` ⇄ `decision`／`geometry`）の相互 import 禁止。配線は `engine`／
+  テスト組み立て側
 - 具象ストアや Loader を engine が直接型依存しない。port と注入で閉じる
+- torch／timm／anomalib の import は `boundary` 限定。model・geometry・engine は numpy で書く
 
 ## Code Organization Principles
 
