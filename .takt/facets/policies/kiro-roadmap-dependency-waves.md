@@ -27,7 +27,7 @@
 roadmap の checklist marker は spec readiness を表す。implementation completion を表してはいけない。
 
 - `[x]` は spec ready marker である。次の evidence がすべて成り立つ場合だけ使う:
-  - `spec.json.phase == "tasks-generated"`
+  - `spec.json.phase` が `tasks-generated` または後続の `implemented`
   - `approvals.requirements.generated == true`
   - `approvals.requirements.approved == true`
   - `approvals.design.generated == true`

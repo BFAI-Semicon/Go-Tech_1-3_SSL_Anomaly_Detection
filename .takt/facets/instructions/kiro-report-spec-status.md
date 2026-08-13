@@ -23,6 +23,7 @@
    - `requirements-generated` は `requirements.md` を要求する。
    - `design-generated` は `requirements.md` と `design.md` を要求する。
    - `tasks-generated` は `requirements.md`、`design.md`、`tasks.md` を要求する。
+   - `implemented` は `tasks-generated` と同じ artifact を要求する。
 6. phase artifact の不足は `error_category: ARTIFACT_MISSING` に写像する。
 7. phase と approval state の矛盾は `error_category: LIFECYCLE_INCONSISTENT` に写像する。
 8. `status: FOUND` で、current phase が要求する artifact がすべて存在し、`ready_for_implementation` が true の場合だけ `readiness: READY` を返す。

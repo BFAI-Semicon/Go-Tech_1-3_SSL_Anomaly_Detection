@@ -20,6 +20,7 @@ Full custom reason: built-in policies do not define `.kiro/steering` and `.kiro/
 - `requirements-generated` は `requirements.md` を必要とする。
 - `design-generated` は `requirements.md` と `design.md` を必要とする。`research.md` は optional supplemental input。
 - `tasks-generated` は `requirements.md`、`design.md`、`tasks.md`、`spec.json` を必要とする。
+- `implemented` は `tasks-generated` と同じ artifact を必要とする。
 - 必須 artifact がない場合は `ARTIFACT_MISSING`。
 - `spec.json` が読めない、または invalid な場合は `SPEC_JSON_INVALID`。
 - phase、approvals、artifact presence が矛盾する場合は `LIFECYCLE_INCONSISTENT`。

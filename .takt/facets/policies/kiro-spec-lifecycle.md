@@ -24,6 +24,15 @@ Full custom reason: built-in policies do not define `.kiro/specs/<feature>/spec.
   - `approvals.tasks.generated`: true。
   - `approvals.tasks.approved`: human approval または auto-approve 後だけ true。
   - `ready_for_implementation`: tasks が approved で、上流 readiness gate が implementation を保留していない場合だけ true。
+- `implemented`
+  - Required artifacts: `requirements.md`, `design.md`, `tasks.md`（`tasks-generated` と同じ）。
+  - `approvals.requirements.approved`: true。
+  - `approvals.design.approved`: true。
+  - `approvals.tasks.generated`: true。
+  - `approvals.tasks.approved`: true。
+  - `tasks.md` の executable leaf task がすべて `[x]`。
+  - `ready_for_implementation`: true のまま残してよい（再検証の入口を閉じない）。
+  - spec ready 判定では `tasks-generated` の後続 phase として扱う。
 
 ## Auto-Approve
 
