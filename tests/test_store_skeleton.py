@@ -5,6 +5,7 @@ _STORE_PACKAGE = "patch_feature_store"
 _STORE_PACKAGE_MODULES = (
     _STORE_PACKAGE,
     f"{_STORE_PACKAGE}.engine",
+    f"{_STORE_PACKAGE}.engine_snapshot",
     f"{_STORE_PACKAGE}.model",
     f"{_STORE_PACKAGE}.model.types",
     f"{_STORE_PACKAGE}.model.criteria",

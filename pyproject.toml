@@ -173,6 +173,7 @@ name = "patch_feature_store の層の依存方向（外側から内側のみ）"
 type = "layers"
 layers = [
     "patch_feature_store.engine",
+    "patch_feature_store.engine_snapshot",
     "patch_feature_store.boundary | patch_feature_store.catalog",
     "patch_feature_store.model",
 ]
@@ -209,6 +210,7 @@ source_modules = [
     "patch_feature_store.model",
     "patch_feature_store.catalog",
     "patch_feature_store.engine",
+    "patch_feature_store.engine_snapshot",
 ]
 forbidden_modules = ["faiss", "torch", "anomalib"]
 
