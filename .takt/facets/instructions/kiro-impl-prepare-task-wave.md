@@ -29,4 +29,5 @@
 
 - `dispatch_mode: wave`、`wave_tasks`、`wave_worktrees prepared` を持つ `STATUS: READY_FOR_REVIEW` は `execute-task-wave` へ進む。
 - `selected_task` と `blocker_note_required: true` を持つ `STATUS: BLOCKED` はprogress/blocker handlingへ進む。
+- dispatch が `wave` ではなく wave 前提が不成立で worktree を作っていない `STATUS: BLOCKED` は、single task planning へ戻す。`debug_context` に dispatch の `dispatch_mode` と正規経路を記す。
 - それ以外の `STATUS: BLOCKED` または `STATUS: NEEDS_CONTEXT` はTeamLeader execution前にwaveを停止する。

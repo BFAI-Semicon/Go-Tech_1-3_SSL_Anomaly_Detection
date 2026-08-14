@@ -1,0 +1,838 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>patch-feature-store 設計サマリ</title>
+<style>
+  :root {
+    color-scheme: only light;
+    --bg: #fcfcfc;
+    --bg-soft: #f4f4f5;
+    --bg-code: #f1f1f3;
+    --fg: #17181c;
+    --fg-2: #4b4d55;
+    --fg-3: #74767f;
+    --line: #dcdce0;
+    --line-2: #ebebee;
+    --accent: #2f6fb0;
+    --warn-bg: #fdf6e7;
+    --warn-line: #e0c48a;
+    --ok: #1f7a55;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  }
+  * { box-sizing: border-box; }
+  html {
+    scroll-behavior: smooth;
+    background: #fcfcfc;
+    color: #17181c;
+  }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background: #fcfcfc;
+    color: #17181c;
+    font-family: system-ui, -apple-system, "Hiragino Kaku Gothic ProN", "Noto Sans JP", Meiryo, sans-serif;
+    font-size: 15px;
+    line-height: 1.75;
+  }
+  .layout {
+    display: grid;
+    grid-template-columns: 232px minmax(0, 1fr);
+    gap: 40px;
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 40px 28px 96px;
+  }
+  nav {
+    position: sticky;
+    top: 32px;
+    align-self: start;
+    font-size: 13px;
+    border-left: 1px solid var(--line);
+    padding-left: 14px;
+  }
+  nav p { margin: 0 0 10px; color: var(--fg-3); letter-spacing: .04em; }
+  nav ol { list-style: none; margin: 0; padding: 0; }
+  nav li { margin: 0 0 4px; }
+  nav a { color: var(--fg-2); text-decoration: none; }
+  nav a:hover { color: var(--accent); }
+  header h1 { font-size: 27px; line-height: 1.4; margin: 0 0 6px; letter-spacing: -.01em; }
+  header .src { color: var(--fg-3); font-size: 13px; margin: 0; }
+  section { margin-top: 52px; }
+  section > h2 {
+    font-size: 19px;
+    margin: 0 0 14px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--line);
+  }
+  h3 { font-size: 15px; margin: 28px 0 8px; }
+  p { margin: 0 0 12px; }
+  .lead { font-size: 16px; }
+  code, .mono { font-family: var(--mono); font-size: .9em; }
+  p code, li code, td code, th code, summary code, figcaption code {
+    background: var(--bg-code);
+    border-radius: 4px;
+    padding: .1em .35em;
+  }
+  pre {
+    background: var(--bg-code);
+    border: 1px solid var(--line-2);
+    border-radius: 8px;
+    padding: 14px 16px;
+    overflow-x: auto;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    line-height: 1.6;
+    margin: 0 0 12px;
+  }
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(148px, 1fr));
+    gap: 12px;
+    margin: 20px 0 0;
+  }
+  .stat { border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; }
+  .stat b { display: block; font-size: 26px; font-weight: 600; line-height: 1.2; letter-spacing: -.02em; }
+  .stat span { color: var(--fg-3); font-size: 12px; }
+  table { width: 100%; border-collapse: collapse; margin: 0 0 12px; font-size: 13.5px; }
+  th, td { text-align: left; vertical-align: top; padding: 8px 10px; border-bottom: 1px solid var(--line-2); }
+  th { color: var(--fg-3); font-weight: 600; font-size: 12px; letter-spacing: .03em; border-bottom: 1px solid var(--line); }
+  tbody tr:hover { background: var(--bg-soft); }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .own-self td:last-child { color: var(--ok); }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
+  .card { border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; }
+  .card h4 { margin: 0 0 6px; font-size: 13px; color: var(--fg-3); font-weight: 600; }
+  .card p { margin: 0; font-size: 13.5px; }
+  figure { margin: 0 0 12px; }
+  figure svg { display: block; width: 100%; height: auto; }
+  figcaption { color: var(--fg-3); font-size: 12.5px; margin-top: 8px; }
+  details {
+    border-bottom: 1px solid var(--line-2);
+    padding: 10px 0;
+  }
+  details summary { cursor: pointer; font-weight: 600; font-size: 14px; }
+  details summary::marker { color: var(--fg-3); }
+  details > div { margin-top: 8px; font-size: 13.5px; color: var(--fg-2); }
+  .note {
+    border: 1px solid var(--warn-line);
+    background: var(--warn-bg);
+    border-radius: 8px;
+    padding: 14px 18px;
+  }
+  .note h3 { margin: 0 0 8px; font-size: 14px; }
+  .note ul { margin: 0; padding-left: 20px; font-size: 13.5px; }
+  .note li { margin-bottom: 3px; }
+  ul.tight { margin: 0 0 12px; padding-left: 20px; }
+  ul.tight li { margin-bottom: 4px; }
+  .bars { display: grid; grid-template-columns: max-content minmax(0, 1fr) max-content; gap: 6px 12px; align-items: center; font-size: 13.5px; }
+  .bars .track { background: var(--bg-soft); border-radius: 3px; height: 14px; }
+  .bars .fill { background: var(--accent); height: 14px; border-radius: 3px; }
+  .bars .v { color: var(--fg-3); font-variant-numeric: tabular-nums; }
+  footer { margin-top: 64px; padding-top: 16px; border-top: 1px solid var(--line); color: var(--fg-3); font-size: 12.5px; }
+  @media (max-width: 900px) {
+    .layout { grid-template-columns: minmax(0, 1fr); gap: 0; padding: 24px 18px 64px; }
+    nav { position: static; border-left: 0; border-bottom: 1px solid var(--line); padding: 0 0 16px; margin-bottom: 8px; }
+    nav ol { columns: 2; }
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+
+<nav>
+  <p>目次</p>
+  <ol>
+    <li><a href="#overview">1. この spec の要旨</a></li>
+    <li><a href="#architecture">2. 層構成と依存方向</a></li>
+    <li><a href="#decisions">3. 6 つの設計判断</a></li>
+    <li><a href="#register">4. 登録の流れ</a></li>
+    <li><a href="#search">5. 検索対象の決め方</a></li>
+    <li><a href="#prune">6. 間引きの 4 分岐</a></li>
+    <li><a href="#atomicity">7. 途中で壊れない書き方</a></li>
+    <li><a href="#api">8. 公開 API</a></li>
+    <li><a href="#data">9. データモデル</a></li>
+    <li><a href="#persistence">10. 永続化レイアウト</a></li>
+    <li><a href="#ownership">11. 所有と非所有</a></li>
+    <li><a href="#traceability">12. 要件との対応</a></li>
+    <li><a href="#errors">13. エラーの分類</a></li>
+    <li><a href="#contracts">14. import-linter 契約</a></li>
+    <li><a href="#tests">15. テスト計画</a></li>
+    <li><a href="#performance">16. 性能とスケール</a></li>
+    <li><a href="#retrigger">17. 再検証トリガー</a></li>
+  </ol>
+</nav>
+
+<main>
+<header>
+  <h1>patch-feature-store 設計サマリ</h1>
+  <p class="src">出典: <code>.kiro/specs/patch-feature-store/design.md</code>（1114 行）／新設パッケージ <code>src/patch_feature_store</code>。この HTML は要約であり、正典は design.md。</p>
+</header>
+
+<section id="overview">
+  <h2>1. この spec の要旨</h2>
+  <p class="lead">上流 <code>ssl-vit-feature-extraction</code> が作ったパッチ特徴を、後から検索できる索引として保持するパッケージ <code>patch_feature_store</code> を新設する。保持の単位は<strong>プロトタイプ</strong>（1 件以上のパッチ特徴を集約したもの）で、安定・再利用しない整数の識別子を持ち、正常性の担保根拠・種別・位置・ドメインタグ・由来キー・注釈メタと紐づく。</p>
+  <p>利用者は下流 spec の合成ルートである。<code>primary-anomaly-detection</code> は正常集合への近傍検索を、<code>promptable-correction-layer</code> は識別子を指定した類似度問い合わせを、<code>evaluation-framework</code> は由来キー単位の固定サイズバンクを使う。いずれも本パッケージの型と <code>feature_extraction</code> の型だけを介し、FAISS・anomalib・torch の型には触れない。既存 <code>correction_layer</code>・<code>feature_extraction</code> と同じ層パターン（<code>model</code> → 中間層 → <code>engine</code>）を踏襲する 3 つ目のパッケージになる。</p>
+
+  <div class="stats">
+    <div class="stat"><b>23</b><span>実装モジュール</span></div>
+    <div class="stat"><b>45</b><span>公開 API の名前</span></div>
+    <div class="stat"><b>53</b><span>受入基準（要件 8 件）</span></div>
+    <div class="stat"><b>7</b><span>追加 import-linter 契約</span></div>
+    <div class="stat"><b>14</b><span>テストファイル</span></div>
+  </div>
+
+  <h3>この設計が引き受ける 6 つのこと</h3>
+  <ul class="tight">
+    <li>初期構築と定期追加を<strong>同じ登録操作</strong>で受け付け、既存プロトタイプとの最近傍距離で「新規追加」か「集約」かを要求単位のバッチで決める。</li>
+    <li>正常性の担保根拠が示された要求だけを受け入れ、根拠と種別を後から辿れる形で記録する。</li>
+    <li>正常集合への近傍検索と、識別子指定の類似度問い合わせを、同じ距離尺度（コサイン）で提供する。</li>
+    <li>coreset 再選択と失効（expiry）間引きでサイズ上限を保ちつつ、間引き保護と <code>kind=defect</code> は除外対象から外す。</li>
+    <li>永続化・再読込で同一クエリに同一結果を返し、抽出器同一性メタの不一致は登録時・検索時の双方で拒否する。</li>
+    <li>由来キー単位の固定サイズバンクを複数構築し、同一指定の再実行で同一集合を再現する。</li>
+  </ul>
+
+  <h3>引き受けないこと</h3>
+  <ul class="tight">
+    <li>パッチ特徴の生成・タイル化・バックボーン切替（<code>ssl-vit-feature-extraction</code>）。</li>
+    <li>異常スコア算出・ヒートマップ・ROI 候補抽出（<code>primary-anomaly-detection</code>）。</li>
+    <li>正常性の検証そのもの、ROI 注釈受付、LLM による構造化（<code>llm-feedback-structuring</code>）。</li>
+    <li>補正レコードの適用判定と <code>match.prototype_ids</code> の書き換え（<code>promptable-correction-layer</code>）。</li>
+    <li>過検出率・AUROC などの指標算出（<code>evaluation-framework</code>）、バンクの版管理（Phase 5）、近似索引（IVF／PQ）の採用。</li>
+  </ul>
+</section>
+
+<section id="architecture">
+  <h2>2. 層構成と依存方向</h2>
+  <p>中間層を 2 つに分ける。<code>catalog</code> は台帳と純粋ロジック（受け入れ判定・集約・間引き・バンク）、<code>boundary</code> は外部依存（FAISS・anomalib・ファイル I/O・システム時刻）である。<code>engine</code> の <code>PatchFeatureStore</code> が両者を合成し、<strong>台帳とベクトル索引の同期を 1 箇所だけで担う</strong>。</p>
+  <figure>
+    <svg viewBox="0 0 900 440" role="img" aria-label="patch_feature_store の層構成と import 方向">
+      <defs>
+        <marker id="ar" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L8,4 L0,8 z" fill="currentColor" opacity=".55"/>
+        </marker>
+      </defs>
+      <g fill="none" stroke="currentColor" stroke-opacity=".55" marker-end="url(#ar)">
+        <line x1="260" y1="66" x2="260" y2="90"/>
+        <path d="M410 44 H664 V90"/>
+        <line x1="300" y1="270" x2="300" y2="288"/>
+        <line x1="690" y1="270" x2="690" y2="288"/>
+        <line x1="635" y1="208" x2="635" y2="216"/>
+      </g>
+
+      <g font-size="12" fill="currentColor" fill-opacity=".55" text-anchor="end">
+        <text x="94" y="48">engine</text>
+        <text x="94" y="186">catalog / boundary</text>
+        <text x="94" y="352">model</text>
+      </g>
+
+      <g stroke="currentColor" stroke-opacity=".22" fill="none">
+        <rect x="110" y="94" width="380" height="176" rx="8"/>
+        <rect x="510" y="94" width="370" height="176" rx="8"/>
+        <rect x="110" y="292" width="770" height="126" rx="8"/>
+      </g>
+      <g font-size="11" fill="currentColor" fill-opacity=".45">
+        <text x="122" y="112">catalog（台帳と純粋ロジック）</text>
+        <text x="522" y="112">boundary（外部依存はここだけ）</text>
+        <text x="122" y="310">model（型・Protocol・設定。上段が上位層）</text>
+        <text x="126" y="252">6 モジュールは互いに import しない（配線は engine）</text>
+      </g>
+
+      <g font-size="12.5" text-anchor="middle" fill="currentColor">
+        <g stroke="#2f6fb0" fill="none"><rect x="110" y="22" width="300" height="44" rx="6"/></g>
+        <text x="260" y="49">engine.py — PatchFeatureStore</text>
+
+        <g stroke="currentColor" stroke-opacity=".35" fill="none">
+          <rect x="126" y="124" width="112" height="36" rx="6"/>
+          <rect x="250" y="124" width="112" height="36" rx="6"/>
+          <rect x="374" y="124" width="104" height="36" rx="6"/>
+          <rect x="126" y="172" width="112" height="36" rx="6"/>
+          <rect x="250" y="172" width="112" height="36" rx="6"/>
+          <rect x="374" y="172" width="104" height="36" rx="6"/>
+          <rect x="524" y="124" width="120" height="36" rx="6"/>
+          <rect x="656" y="124" width="136" height="36" rx="6"/>
+          <rect x="804" y="124" width="68" height="36" rx="6"/>
+          <rect x="560" y="172" width="150" height="36" rx="6"/>
+          <rect x="560" y="216" width="150" height="36" rx="6"/>
+          <rect x="126" y="322" width="112" height="36" rx="6"/>
+          <rect x="250" y="322" width="112" height="36" rx="6"/>
+          <rect x="374" y="322" width="112" height="36" rx="6"/>
+          <rect x="498" y="322" width="124" height="36" rx="6"/>
+          <rect x="634" y="322" width="112" height="36" rx="6"/>
+          <rect x="758" y="322" width="100" height="36" rx="6"/>
+          <rect x="126" y="368" width="112" height="36" rx="6"/>
+          <rect x="250" y="368" width="112" height="36" rx="6"/>
+          <rect x="374" y="368" width="112" height="36" rx="6"/>
+          <rect x="498" y="368" width="112" height="36" rx="6"/>
+          <rect x="622" y="368" width="100" height="36" rx="6"/>
+        </g>
+        <text x="182" y="147">registry</text>
+        <text x="306" y="147">journal</text>
+        <text x="426" y="147">banks</text>
+        <text x="182" y="195">admission</text>
+        <text x="306" y="195">merging</text>
+        <text x="426" y="195">pruning</text>
+        <text x="584" y="147">faiss_index</text>
+        <text x="724" y="147">anomalib_coreset</text>
+        <text x="838" y="147">clock</text>
+        <text x="635" y="195">snapshot_store</text>
+        <text x="635" y="239">snapshot_schema</text>
+        <text x="182" y="345">ports</text>
+        <text x="306" y="345">snapshot</text>
+        <text x="430" y="345">prototype</text>
+        <text x="560" y="345">registration</text>
+        <text x="690" y="345">operations</text>
+        <text x="808" y="345">bank</text>
+        <text x="182" y="391">query</text>
+        <text x="306" y="391">errors</text>
+        <text x="430" y="391">criteria</text>
+        <text x="554" y="391">config</text>
+        <text x="672" y="391">types</text>
+      </g>
+    </svg>
+    <figcaption>矢印は import する向き。逆流と <code>catalog</code> ⇄ <code>boundary</code> の相互 import は禁止で、<code>catalog</code> の 6 モジュールも互いに import しない。<code>faiss</code>・<code>torch</code>・<code>anomalib</code> は <code>boundary</code> の内側にしか存在せず、<code>model</code>・<code>catalog</code>・<code>engine</code> は numpy・pydantic・標準ライブラリ・<code>feature_extraction</code> の型だけに依存する。<code>model</code> の 11 モジュールは 7 段の一方向（<code>ports</code> が最上位、<code>criteria</code> / <code>config</code> / <code>types</code> が最下位）。<code>boundary</code> の 4 アダプタは互いに独立で、共通の直列化スキーマ <code>snapshot_schema</code> だけが下段にある。</figcaption>
+  </figure>
+
+  <h3>ファイル構造</h3>
+<pre>src/patch_feature_store/
+├── __init__.py          公開 API。__all__ でドメイン型・操作・例外・境界の構築口のみ
+├── engine.py            合成ルート。PatchFeatureStore（台帳と索引の同期、各操作の配線）
+├── model/
+│   ├── types.py         PrototypeKind, PruneOperation, DatasetEvidence,
+│   │                    HumanVerificationEvidence, NormalityEvidence
+│   ├── criteria.py      DomainCriteria, ProvenanceCriteria（絞り込み条件と一致判定）
+│   ├── config.py        StoreConfig（集約しきい値）
+│   ├── errors.py        例外階層, IdentityMismatch
+│   ├── query.py         NeighborHit, IncludeIds, ExcludeIds, IdSelection,
+│   │                    NormalSearchQuery, SimilarityQuery, SimilarityLookup
+│   ├── registration.py  RegistrationRequest, RegistrationOutcome, PruneOutcome
+│   ├── operations.py    RegistrationRecord, PruneLogEntry, OperationLogEntry
+│   ├── bank.py          BankSpec, BankComposition
+│   ├── prototype.py     PatchContribution, PrototypeDraft, PrototypeRecord,
+│   │                    PrototypeResolution 各型, PrototypeView など
+│   ├── snapshot.py      StoreSnapshot（永続化の受け渡し単位）
+│   └── ports.py         VectorIndex, CoresetSelector, SnapshotRepository, Clock
+├── catalog/
+│   ├── registry.py      PrototypeRegistry, RegistryChange（id 発番・生存状態・対応表）
+│   ├── journal.py       OperationJournal（登録記録と間引き記録の追記・照会）
+│   ├── admission.py     受け入れ検査と正規化
+│   ├── merging.py       集約判定と集約後レコードの合成
+│   ├── pruning.py       expiry 判定・保護区分・上限の充足可能性
+│   └── banks.py         BankRegistry（候補抽出・決定的サブサンプル）
+└── boundary/
+    ├── faiss_index.py       FaissFlatIndex, faiss_flat_index
+    ├── anomalib_coreset.py  AnomalibCoresetSelector, anomalib_coreset_selector
+    ├── snapshot_schema.py   永続形式の pydantic モデルと相互変換
+    ├── snapshot_store.py    DirectorySnapshotRepository（npy / json / jsonl の I/O）
+    └── clock.py             UtcClock, utc_clock</pre>
+  <p>各モジュールは 300 行未満に収める想定である。<code>engine.py</code> が超える場合は、スナップショットの組み立てと復元を <code>engine_snapshot.py</code> へ切り出し、同じ変更で層契約に段を追加する。<code>registry</code>（プロトタイプ単位の権威）と <code>journal</code>（登録単位の権威）を結合するのは <code>engine</code> だけである。</p>
+
+  <h3>技術スタック</h3>
+  <table>
+    <thead><tr><th>役割</th><th>採用</th></tr></thead>
+    <tbody>
+      <tr><td>近傍探索</td><td><code>faiss-cpu</code> 1.14.3 の <code>IndexIDMap2(IndexFlatIP(dim))</code>。int64 の <code>prototype_id</code> を FAISS の ID として直接持つ</td></tr>
+      <tr><td>coreset 選択</td><td><code>anomalib</code> の <code>KCenterGreedy</code>（k-center greedy）。自作せずライブラリから呼ぶ</td></tr>
+      <tr><td>数値表現</td><td>公開契約は numpy（float32 の C 連続配列。埋め込みは <code>(N, D)</code>、位置は <code>(N, 2)</code>）。torch は coreset アダプタの内部だけ</td></tr>
+      <tr><td>永続形式</td><td><code>numpy.save</code>（ベクトルと生存 id）＋ JSON / JSON Lines（メタと操作記録）。pydantic v2（<code>extra="forbid"</code>）で検証。parquet／Lance は採用しない</td></tr>
+      <tr><td>時刻</td><td><code>Clock</code> ポート経由。実装は <code>datetime.now(UTC)</code></td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="decisions">
+  <h2>3. 6 つの設計判断</h2>
+  <div class="cards">
+    <div class="card">
+      <h4>① 索引は FAISS Flat（厳密解）に固定</h4>
+      <p>近似索引（IVF／PQ）は採らない。再読込後の同一結果（要件 6.2）と、補正レイヤの <code>match.similarity_threshold</code> 判定はいずれも厳密解を前提にする。方式の切替は要件が求めておらず、採用は再検証トリガー扱いにする。</p>
+    </div>
+    <div class="card">
+      <h4>② 距離尺度はコサインに固定</h4>
+      <p>保持するベクトルを L2 正規化し、内積をコサイン類似度として扱う。近傍検索は<strong>距離</strong>（1 − 類似度）、識別子指定の問い合わせは<strong>類似度</strong>を返す。後者が類似度なのは、補正レコードのしきい値が <code>[-1, 1]</code> の類似度で検証されているため。</p>
+    </div>
+    <div class="card">
+      <h4>③ 集約したら新しい id を発番する</h4>
+      <p>集約後は重心が変わる。既存 id を続けると「同じ id が別のベクトルを指す」状態になり、補正レコードのしきい値判定の意味が黙って変わる。毎回新 id を発番し、集約前 id は retire して対応表に残す。</p>
+    </div>
+    <div class="card">
+      <h4>④ 集約判定は要求単位のバッチ最近傍</h4>
+      <p>同一要求内のパッチ同士は「既存プロトタイプ」ではないので集約しない（次回登録か coreset 再選択で吸収する）。要求内の全クエリを 1 回のバッチ検索で処理する。逐次判定は実測で実運用に耐えない。</p>
+    </div>
+    <div class="card">
+      <h4>⑤ メタデータはプロトタイプ層と登録層に正規化</h4>
+      <p>ドメインタグ・由来キー・担保根拠・注釈メタは<strong>登録要求単位</strong>の値なので、登録記録を権威にする。プロトタイプは寄与パッチごとに登録 ID と位置だけを持つ。この登録記録が要件 8 の操作記録そのものでもある。</p>
+    </div>
+    <div class="card">
+      <h4>⑥ バンクは主索引上の凍結された id 集合</h4>
+      <p>バンクごとに索引を作らず、検索時に ID セレクタで絞る。構成は仕様（由来キー条件・サイズ・シード）から決定的に再現できるので、永続化の対象にしない。</p>
+    </div>
+  </div>
+</section>
+
+<section id="register">
+  <h2>4. 登録の流れ</h2>
+  <p>入口は <code>register</code> ひとつで、初期構築と追加を区別する引数を持たない。違うのは担保根拠の種別（データセット由来か人手検証由来か）だけである。</p>
+  <figure>
+    <svg viewBox="0 0 900 146" role="img" aria-label="register の処理順序">
+      <defs>
+        <marker id="ar2" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L8,4 L0,8 z" fill="currentColor" opacity=".55"/>
+        </marker>
+      </defs>
+      <g stroke="currentColor" stroke-opacity=".55" marker-end="url(#ar2)" fill="none">
+        <line x1="156" y1="78" x2="178" y2="78"/>
+        <line x1="314" y1="78" x2="336" y2="78"/>
+        <line x1="488" y1="78" x2="510" y2="78"/>
+        <line x1="678" y1="78" x2="708" y2="78"/>
+      </g>
+      <g stroke="currentColor" stroke-opacity=".28" stroke-dasharray="4 3" fill="none">
+        <rect x="2" y="46" width="684" height="64" rx="8"/>
+        <rect x="700" y="46" width="196" height="64" rx="8"/>
+      </g>
+      <g font-size="11" fill="currentColor" fill-opacity=".5">
+        <text x="8" y="36">準備段：検査と計画だけ。台帳とジャーナルは変更しない</text>
+        <text x="706" y="36">コミット段</text>
+      </g>
+      <g stroke="currentColor" stroke-opacity=".35" fill="none">
+        <rect x="10" y="56" width="146" height="44" rx="6"/>
+        <rect x="178" y="56" width="136" height="44" rx="6"/>
+        <rect x="336" y="56" width="152" height="44" rx="6"/>
+        <rect x="510" y="56" width="168" height="44" rx="6"/>
+      </g>
+      <g stroke="#2f6fb0" fill="none"><rect x="708" y="56" width="180" height="44" rx="6"/></g>
+      <g font-size="12.5" text-anchor="middle" fill="currentColor">
+        <text x="83" y="82">admission</text>
+        <text x="246" y="82">index.search</text>
+        <text x="412" y="82">merging</text>
+        <text x="594" y="82">plan_registration</text>
+        <text x="798" y="82">add / remove → apply</text>
+      </g>
+      <g font-size="11" fill="currentColor" fill-opacity=".45" text-anchor="middle">
+        <text x="83" y="128">検査と L2 正規化</text>
+        <text x="246" y="128">最近傍 k=1</text>
+        <text x="412" y="128">新規／集約に振り分け</text>
+        <text x="594" y="128">id を確定（未反映）</text>
+        <text x="798" y="128">索引 → 台帳 → 記録</text>
+      </g>
+    </svg>
+    <figcaption>最近傍検索は同一種別の生存 id に限定したセレクタで行う。<code>plan_registration</code> は識別子を確定した <code>RegistryChange</code> を返すだけで台帳を変えず、<code>apply</code> が初めて反映する。索引更新（<code>add</code> → <code>remove</code>）が失敗した時点で止めれば、台帳とジャーナルは要求前のままになる。</figcaption>
+  </figure>
+
+  <h3>受け入れ検査の順序</h3>
+  <p>担保根拠と種別の整合 → 供給ラベルと申告種別の整合 → 抽出器同一性メタの全フィールド一致 → 埋め込み次元 → 数値契約（float32 化・有限値・非ゼロノルム）→ L2 正規化。空のストアへの最初の登録では、要求の同一性メタをストアの採用値にする。</p>
+  <table>
+    <thead><tr><th>種別</th><th>受け入れる担保根拠</th><th>供給ラベルの扱い</th></tr></thead>
+    <tbody>
+      <tr><td><code>normal</code></td><td>データセット由来・人手検証由来の両方</td><td>データセット由来なら <code>image_label == NORMAL</code> を要求（<code>ANOMALOUS</code> は拒否）</td></tr>
+      <tr><td><code>acceptable</code></td><td>人手検証由来のみ</td><td><code>image_label</code> は見ない（<code>ANOMALOUS</code> のパッチを扱う経路）</td></tr>
+      <tr><td><code>defect</code></td><td>人手検証由来のみ</td><td>同上。正常集合検索からは常に外れる</td></tr>
+    </tbody>
+  </table>
+  <p><code>DatasetEvidence</code> の担保根拠はデータセットのラベルに由来するので、そのラベルが <code>ANOMALOUS</code> なら根拠は正常性を担保していない。この検査がないと欠陥パッチを <code>kind=normal</code> として登録できてしまい、要件 2 の目的（汚染の防止）が崩れる。判定は上流が供給した 2 つの値の突合に留め、正常性の検証そのものには踏み込まない。</p>
+
+  <h3>集約すると値がどう決まるか</h3>
+  <p>集約は「既存プロトタイプ 1 件 ＋ 同一要求内でそれを最近傍とした全パッチ」を 1 件へまとめる。判定は<strong>最近傍距離 &lt;= しきい値</strong>（等号を含む）。</p>
+  <table>
+    <thead><tr><th>集約後の値</th><th>規則</th><th>理由</th></tr></thead>
+    <tbody>
+      <tr><td>識別子</td><td>新規発番。集約前 id は retire して対応表に載せる</td><td>重心が変わった集約体に旧 id を使い回さない（判断 ③）</td></tr>
+      <tr><td>重心ベクトル</td><td>寄与パッチ数で重み付けした平均を再正規化</td><td>単位ベクトルの不変条件を保つ</td></tr>
+      <tr><td>寄与・ドメイン・由来キー</td><td>和集合（寄与の併合）</td><td>元の登録記録への参照を失わない</td></tr>
+      <tr><td>間引き保護 <code>pinned</code></td><td>論理和</td><td>集約で保護を弱めない</td></tr>
+      <tr><td>失効期限 <code>expires_at</code></td><td>より遅い方（<code>None</code> は無期限＝最も遅い）</td><td>集約で寿命を縮めない</td></tr>
+      <tr><td>種別 <code>kind</code></td><td>既存プロトタイプの種別を継ぐ</td><td>候補は同一種別内からしか選ばない</td></tr>
+    </tbody>
+  </table>
+  <p>同じ既存プロトタイプを最近傍とする複数のクエリは 1 件へまとめる。1 回の登録で同じ id が二重に retire されないようにするためである。</p>
+</section>
+
+<section id="search">
+  <h2>5. 検索対象の決め方</h2>
+  <p>正常集合の検索では <code>kind=defect</code> を必ず外す。そのうえで <code>domain</code>（ドメイン限定）と <code>bank_id</code>（バンク限定）を独立に指定でき、<strong>両方指定されたら交差</strong>を対象にする。片方を優先して他方を無視することはしない。</p>
+  <figure>
+    <svg viewBox="0 0 900 180" role="img" aria-label="検索対象となる id 集合の決め方">
+      <defs>
+        <marker id="ar3" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L8,4 L0,8 z" fill="currentColor" opacity=".55"/>
+        </marker>
+      </defs>
+      <g stroke="currentColor" stroke-opacity=".55" marker-end="url(#ar3)" fill="none">
+        <line x1="204" y1="39" x2="246" y2="56"/>
+        <line x1="204" y1="87" x2="246" y2="70"/>
+        <line x1="342" y1="63" x2="384" y2="63"/>
+        <line x1="590" y1="63" x2="676" y2="80"/>
+        <line x1="204" y1="149" x2="384" y2="149"/>
+        <line x1="590" y1="149" x2="676" y2="99"/>
+      </g>
+      <g stroke="currentColor" stroke-opacity=".35" fill="none">
+        <rect x="8" y="20" width="196" height="38" rx="6"/>
+        <rect x="8" y="68" width="196" height="38" rx="6"/>
+        <rect x="246" y="44" width="96" height="38" rx="6"/>
+        <rect x="384" y="44" width="206" height="38" rx="6"/>
+        <rect x="8" y="130" width="196" height="38" rx="6"/>
+        <rect x="384" y="130" width="206" height="38" rx="6"/>
+      </g>
+      <g stroke="#2f6fb0" fill="none"><rect x="676" y="68" width="200" height="38" rx="6"/></g>
+      <g font-size="12.5" text-anchor="middle" fill="currentColor">
+        <text x="106" y="44">domain 一致の生存 id</text>
+        <text x="106" y="92">バンクのメンバー ∩ 生存 id</text>
+        <text x="294" y="68">交差</text>
+        <text x="487" y="68">IncludeIds（defect を除く）</text>
+        <text x="106" y="154">限定指定なし（既定）</text>
+        <text x="487" y="154">ExcludeIds（defect のみ）</text>
+        <text x="776" y="92">VectorIndex.search</text>
+      </g>
+      <g font-size="11" fill="currentColor" fill-opacity=".45">
+        <text x="246" y="112">片方だけの指定でも同じ経路（交差の項が 1 つになる）</text>
+      </g>
+    </svg>
+    <figcaption>既定経路（限定なし）は正常集合の全体を単一プールとして扱い、<code>defect</code> だけを外す<strong>除外</strong>セレクタを渡す。<code>defect</code> は件数が少ない前提なので、包含リストを毎回組むより小さくなる。交差が空になる指定は不正ではなく、空の検索結果として返す。</figcaption>
+  </figure>
+  <p>ID セレクタの構築費用は対象件数に比例するため、包含 id が生存件数の半分を超える場合は補集合の除外セレクタへ自動的に切り替える。この判断は生存件数を知っている <code>PrototypeRegistry</code> が持つ。</p>
+</section>
+
+<section id="prune">
+  <h2>6. 間引きの 4 分岐</h2>
+  <p>サイズ上限を保つ手段は 2 つある。<strong>coreset 再選択</strong>（上限まで代表点を残す）と<strong>失効間引き</strong>（期限切れを外す）である。どちらも <code>pinned</code> は必ず残す。<code>kind=defect</code> は coreset では保護群に入るが、失効間引きの対象にはなる。</p>
+  <p>coreset 再選択の分かれ道は「選択件数 = 上限 − 保護群件数」で決まる。保護群は <code>pinned</code> または <code>kind=defect</code> のプロトタイプである。<code>CoresetSelector.select</code> の事前条件が <code>1 &lt;= size &lt;= 件数</code> なので、selector を呼べる区間は 1 つだけになる。</p>
+  <table>
+    <thead><tr><th>条件</th><th>selector</th><th>結果</th></tr></thead>
+    <tbody>
+      <tr><td>選択件数が負（保護群 &gt; 上限）</td><td>呼ばない</td><td><code>CoresetSizeLimitError(protected_count, size_limit)</code>。何も除外しない（上限と保護を同時に満たす結果が存在しない）</td></tr>
+      <tr><td>選択件数 &gt;= 選択可能群の件数</td><td>呼ばない</td><td>除外なしで終了。間引き記録も残さない（すでに上限以内）</td></tr>
+      <tr><td>選択件数 = 0 かつ選択可能群 &gt;= 1 件（保護群 = 上限）</td><td>呼ばない</td><td>選択可能群を全件除外。「保護群だけを残す」で答えが一意に決まるので成功扱い</td></tr>
+      <tr><td><code>1 &lt;= 選択件数 &lt; 選択可能群の件数</code></td><td>1 回だけ呼ぶ</td><td>選ばれなかった id を検索対象から除外し、間引き記録を残す</td></tr>
+    </tbody>
+  </table>
+  <p>除外された id はレコードを残したまま生存集合から外れる。対応表には載らないので、<code>resolve</code> は「間引きで除外」を意味する <code>PrunedPrototype</code> を返す。id は単調増加で払い出すため再割り当ては起こらない。</p>
+</section>
+
+<section id="atomicity">
+  <h2>7. 途中で壊れない書き方</h2>
+  <p>この設計には「壊れると黙って不整合になる」箇所が 2 つある。<strong>台帳とベクトル索引の同期</strong>と、<strong>6 ファイルにまたがる永続化</strong>である。どちらも 2 段階に分けて、失敗しても中間状態が残らないようにする。</p>
+
+  <h3>状態変更は「準備 → コミット」</h3>
+  <ul class="tight">
+    <li>状態を変える経路（<code>register</code>・<code>reselect_coreset</code>・<code>prune_expired</code>）は、まず検査・最近傍検索・集約計画・間引き対象の決定・識別子の確定までを行う。この段階では台帳もジャーナルも変えず、結果を <code>RegistryChange</code> に持つ。</li>
+    <li>コミットの順序は<strong>索引 → 台帳 → ジャーナル</strong>。台帳の反映（<code>apply</code>）と記録の追記は辞書とリストの更新だけで例外を出さないため、索引更新が失敗した時点で止めれば台帳は要求前のままになる。</li>
+    <li><code>register</code> は <code>add</code>（新規 id と集約後 id）→ <code>remove</code>（集約前 id）の順に索引を更新する。<code>add</code> の失敗時は何も反映せず、<code>remove</code> の失敗時は直前の <code>add</code> を取り消してから送出する。間引きは <code>remove</code> だけなので取り消しは要らない。</li>
+    <li>前提として単一スレッドの逐次利用に限る。並行呼び出しの排他は持たない。</li>
+  </ul>
+
+  <h3>永続化はディレクトリ単位で差し替える</h3>
+  <p>6 ファイルを個別に <code>os.replace</code> すると、一部だけ新しい世代になる状態が起こりうる。そこで書き込みは次の順で行う。</p>
+  <ol class="tight">
+    <li><code>&lt;store_dir&gt;.staging/</code> に 6 ファイルすべてを出力する。</li>
+    <li>既存の <code>&lt;store_dir&gt;</code> を <code>&lt;store_dir&gt;.previous/</code> へ改名する。</li>
+    <li><code>staging</code> を <code>&lt;store_dir&gt;</code> へ改名する。</li>
+    <li><code>previous</code> を削除する。</li>
+  </ol>
+  <p>どの時点で中断しても、完全な世代が <code>store_dir</code> か <code>previous</code> のどちらかに残る。読み込み時は、<code>store_dir</code> が無く <code>previous</code> だけがあれば差し替えの中断と判断して戻してから読み、<code>staging</code> が残っていれば不完全な書き込みとして削除する。</p>
+  <p>読み込みでは pydantic（<code>extra="forbid"</code>）で各ファイルを検証したうえで、相互の整合も検査する。<code>live_ids</code> と行数の一致、生存 id の重複、生存 id のレコード存在、対応表の参照先の存在、生存集合と対応表の二重登録、同一性メタと埋め込み次元の一致など。違反は <code>SnapshotIntegrityError(target, reason)</code> で復元を中止する。</p>
+</section>
+
+<section id="api">
+  <h2>8. 公開 API</h2>
+  <p>パッケージルートの <code>__all__</code> は次の 45 名だけを公開する。公開メソッドのシグネチャと公開例外の属性に現れる型は、union alias も含めてすべて公開する（利用者が触る型を隠さない）。</p>
+  <table>
+    <thead><tr><th>カテゴリ</th><th class="num">件数</th><th>名前</th></tr></thead>
+    <tbody>
+      <tr><td>操作</td><td class="num">1</td><td><code>PatchFeatureStore</code></td></tr>
+      <tr><td>入力型</td><td class="num">11</td><td><code>RegistrationRequest</code>, <code>NormalSearchQuery</code>, <code>SimilarityQuery</code>, <code>BankSpec</code>, <code>StoreConfig</code>, <code>DomainCriteria</code>, <code>ProvenanceCriteria</code>, <code>PrototypeKind</code>, <code>DatasetEvidence</code>, <code>HumanVerificationEvidence</code>, <code>NormalityEvidence</code></td></tr>
+      <tr><td>出力型</td><td class="num">17</td><td><code>RegistrationOutcome</code>, <code>NeighborHit</code>, <code>SimilarityLookup</code>, <code>PrototypeView</code>, <code>PrototypeContributionView</code>, <code>PruneOutcome</code>, <code>BankComposition</code>, <code>RegistrationRecord</code>, <code>PruneLogEntry</code>, <code>PruneOperation</code>, <code>LivePrototype</code>, <code>MergedPrototype</code>, <code>PrunedPrototype</code>, <code>UnknownPrototype</code>, <code>PrototypeResolution</code>, <code>OperationLogEntry</code>, <code>IdentityMismatch</code></td></tr>
+      <tr><td>Protocol</td><td class="num">4</td><td><code>VectorIndex</code>, <code>CoresetSelector</code>, <code>SnapshotRepository</code>, <code>Clock</code></td></tr>
+      <tr><td>境界の構築口</td><td class="num">4</td><td><code>faiss_flat_index</code>, <code>anomalib_coreset_selector</code>, <code>directory_snapshot_repository</code>, <code>utc_clock</code></td></tr>
+      <tr><td>例外</td><td class="num">8</td><td><code>PatchFeatureStoreError</code> と 7 つの派生（<a href="#errors">13 章</a>）</td></tr>
+    </tbody>
+  </table>
+  <p><strong>非公開</strong>: <code>PrototypeRegistry</code> / <code>OperationJournal</code> / <code>BankRegistry</code> / <code>FaissFlatIndex</code> と <code>catalog</code> の純関数。これらは <code>PatchFeatureStore</code> が内部で合成する台帳と手順であり、外から直接触れると「生存 id = 索引の id」という同期の不変条件を迂回できてしまう。境界は具象クラスではなくファクトリ関数だけを公開する（<code>feature_extraction</code> と同じ方針）。<code>PrototypeRecord</code> / <code>PatchContribution</code> も非公開で、読み取り用に整形した <code>PrototypeView</code> として返す。<code>StoreSnapshot</code> / <code>IdSelection</code> は永続化ポートと索引ポートの内部契約である。</p>
+
+  <h3>操作の一覧</h3>
+<pre>class PatchFeatureStore:
+    def __init__(self, config, index, coreset_selector, repository, clock) -> None: ...
+    @classmethod
+    def restore(cls, config, index, coreset_selector, repository, clock) -> "PatchFeatureStore": ...
+
+    def register(self, request: RegistrationRequest) -> RegistrationOutcome: ...
+    def search_normal(self, query: NormalSearchQuery) -> tuple[NeighborHit, ...]: ...
+    def similarities(self, query: SimilarityQuery) -> SimilarityLookup: ...
+    def describe(self, prototype_ids) -> dict[int, PrototypeView]: ...
+    def find_prototypes(self, domain=None, provenance=None) -> tuple[int, ...]: ...
+    def resolve(self, prototype_ids) -> dict[int, PrototypeResolution]: ...
+    def reselect_coreset(self, size_limit: int) -> PruneOutcome: ...
+    def prune_expired(self) -> PruneOutcome: ...
+    def build_bank(self, spec: BankSpec) -> BankComposition: ...
+    def bank_composition(self, bank_id: str) -> BankComposition: ...
+    def operations(self, since: datetime, until: datetime) -> tuple[OperationLogEntry, ...]: ...
+    def save(self) -> None: ...</pre>
+  <p><code>__init__</code> と <code>restore</code> に渡す <code>VectorIndex</code> は<strong>空である</strong>ことが前提である。<code>restore</code> は台帳を再構成したあとに生存 id を追加するだけで既存内容を消さないため、空でない索引を渡すと構築時点で同期の不変条件が崩れる。<code>faiss_flat_index</code> は常に空の索引を返す。</p>
+
+  <h3>4 つのポート</h3>
+<pre>class VectorIndex(Protocol):
+    def add(self, prototype_ids, vectors: np.ndarray) -> None: ...
+    def remove(self, prototype_ids) -> None: ...
+    def search(self, queries, k, selection) -> tuple[tuple[NeighborHit, ...], ...]: ...
+    def reconstruct(self, prototype_ids) -> np.ndarray: ...
+
+class CoresetSelector(Protocol):
+    def select(self, vectors: np.ndarray, size: int) -> tuple[int, ...]: ...
+
+class SnapshotRepository(Protocol):
+    def save(self, snapshot: StoreSnapshot) -> None: ...
+    def load(self) -> StoreSnapshot: ...
+
+class Clock(Protocol):
+    def now(self) -> datetime: ...</pre>
+  <ul class="tight">
+    <li>事前条件: <code>add</code> の <code>vectors</code> は <code>(len(prototype_ids), 次元)</code> の float32 単位ベクトル。<code>search</code> の <code>queries</code> も float32 単位ベクトルで <code>k &gt;= 1</code>。<code>select</code> の <code>size</code> は <code>1 &lt;= size &lt;= len(vectors)</code>。</li>
+    <li>事後条件: <code>search</code> は入力クエリと同順・同数のタプルを返し、各要素は距離昇順で最大 k 件（対象が k 件未満なら全件）。</li>
+    <li>不変条件: <code>VectorIndex</code> の id 集合は台帳の生存 id 集合と一致する。同期を行うのは <code>PatchFeatureStore</code> だけ。</li>
+    <li><strong>件数・次元を読む口はポートに置かない。</strong>次元の権威は採用済みの <code>ExtractorIdentity.embedding_dim</code>、件数の権威は台帳の生存 id 集合であり、同じ事実を 2 経路で公開しない。</li>
+    <li><code>CoresetSelector.select</code> が返すのは id ではなく<strong>行インデックス</strong>である。実装が id 体系を知らずに済むようにするため、対応付けは <code>PatchFeatureStore</code> が持つ。</li>
+  </ul>
+</section>
+
+<section id="data">
+  <h2>9. データモデル</h2>
+  <p>集約ルートは<strong>プロトタイプ</strong>で、ベクトルは索引側が持ち識別子で結ばれる。メタデータの権威は<strong>登録記録</strong>にあり、プロトタイプは寄与パッチごとに「登録 ID と位置」だけを持つ。プロトタイプ 100 万件規模でメタを複製すると重複が支配的になるためである。</p>
+
+  <h3>識別子がとる 3 つの状態</h3>
+  <figure>
+    <svg viewBox="0 0 900 130" role="img" aria-label="プロトタイプ識別子の状態遷移">
+      <defs>
+        <marker id="ar4" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L8,4 L0,8 z" fill="currentColor" opacity=".55"/>
+        </marker>
+      </defs>
+      <g stroke="currentColor" stroke-opacity=".55" marker-end="url(#ar4)" fill="none">
+        <line x1="184" y1="63" x2="248" y2="63"/>
+        <line x1="424" y1="57" x2="488" y2="35"/>
+        <line x1="424" y1="69" x2="488" y2="95"/>
+      </g>
+      <g stroke="currentColor" stroke-opacity=".35" fill="none">
+        <rect x="8" y="44" width="176" height="38" rx="6"/>
+        <rect x="488" y="8" width="290" height="38" rx="6"/>
+        <rect x="488" y="80" width="290" height="38" rx="6"/>
+      </g>
+      <g stroke="#2f6fb0" fill="none"><rect x="248" y="44" width="176" height="38" rx="6"/></g>
+      <g font-size="12.5" text-anchor="middle" fill="currentColor">
+        <text x="96" y="68">未発番 UnknownPrototype</text>
+        <text x="336" y="68">生存 LivePrototype</text>
+        <text x="633" y="32">集約で retire — MergedPrototype</text>
+        <text x="633" y="104">間引きで除外 — PrunedPrototype</text>
+      </g>
+      <g font-size="11" fill="currentColor" fill-opacity=".45" text-anchor="middle">
+        <text x="216" y="56">register</text>
+        <text x="452" y="30">集約</text>
+        <text x="452" y="110">間引き</text>
+      </g>
+    </svg>
+    <figcaption>3 状態は相互排他である（生存 id は対応表に現れず、対応表の鍵は生存集合に現れない）。レコードは発番済みの全 id について保持し続け、id は再利用しない。<code>MergedPrototype.merged_into</code> は対応表を終端まで辿った生存 id を指す。対応先は常に自身より大きい id なので連鎖は有限で循環しない。</figcaption>
+  </figure>
+
+  <h3>4 つの不変条件</h3>
+  <ol class="tight">
+    <li>識別子は単調増加で払い出され、再利用されない。</li>
+    <li>1 つの識別子は「生存」「集約により retire」「間引きにより除外」のいずれか 1 つの状態を持つ。</li>
+    <li>生存識別子の集合はベクトル索引の識別子集合と一致する。</li>
+    <li>プロトタイプの寄与パッチは 1 件以上であり、その件数が集約時の重みとバンクのパッチ数になる。</li>
+  </ol>
+
+  <h3>2 つの権威</h3>
+  <table>
+    <thead><tr><th>型</th><th>持つもの</th><th>役割</th></tr></thead>
+    <tbody>
+      <tr><td><code>PrototypeRecord</code>（非公開）</td><td><code>prototype_id</code>, <code>kind</code>, <code>pinned</code>, <code>expires_at</code>, <code>contributions</code></td><td>プロトタイプ単位の権威。間引き判定の入力はこの 4 項目とベクトルだけ（補正レコードは見ない）</td></tr>
+      <tr><td><code>RegistrationRecord</code>（公開）</td><td><code>registration_id</code>, <code>occurred_at</code>, <code>image_id</code>, <code>split</code>, <code>domain</code>, <code>provenance</code>, <code>evidence</code>, 注釈メタ, <code>structured_json_ref</code>, 適用メタ, <code>prototype_ids</code></td><td>登録単位の権威。同時に要件 8 の操作記録そのもの。追記のみで、後の集約・間引きでは書き換えない</td></tr>
+      <tr><td><code>PatchContribution</code>（非公開）</td><td><code>registration_id</code>, <code>position</code></td><td>両者を結ぶ。<code>describe</code> では <code>PrototypeContributionView</code>（位置＋登録記録）として返す</td></tr>
+    </tbody>
+  </table>
+  <p><code>RegistrationRecord.prototype_ids</code> は「登録時点で生成された id」であって現在の構成ではない。現在の状態を知るには <code>resolve</code> か <code>describe</code> を使う。</p>
+
+  <h3>絞り込み条件は 2 型に統合する</h3>
+  <p>ドメイン限定（要件 3.6）、メタデータ絞り込み（4.4）、バンクの包含・除外（7.1、7.2）は、いずれも「軸ごとの値集合による一致判定」である。そこで <code>DomainCriteria</code>（工程・材料・装置）と <code>ProvenanceCriteria</code>（ウェハ ID・ロット ID・撮像日）の 2 型に統合し、上流の <code>DomainTags</code> / <code>ProvenanceKeys</code> と軸を 1 対 1 に対応させる。</p>
+  <ul class="tight">
+    <li><strong>空集合の軸は「無指定」</strong>で何にでも一致する。値が <code>None</code> のタグは、その軸が無指定のときだけ一致する。</li>
+    <li><code>BankSpec.exclude = None</code> は「除外判定そのものを行わない」。全軸が空集合の <code>ProvenanceCriteria</code> は「何にでも一致」なので、これを除外条件に使うと全候補が外れてしまい「除外なし」を表現できない。</li>
+  </ul>
+
+  <h3>検索・照会の戻り値</h3>
+  <table>
+    <thead><tr><th>操作</th><th>戻り値</th><th>読み方</th></tr></thead>
+    <tbody>
+      <tr><td><code>search_normal</code></td><td><code>tuple[NeighborHit, ...]</code></td><td><code>distance</code> はコサイン距離（1 − 類似度）。近い順に最大 k 件で、対象が k 件未満ならその件数だけ返る</td></tr>
+      <tr><td><code>similarities</code></td><td><code>SimilarityLookup</code></td><td><code>similarities</code>（生存 id → コサイン<strong>類似度</strong>）、<code>merged</code>（集約された id → 対応先）、<code>unresolved</code>（未知または除外済み）。読み替えはこちらで行わず提示に留める</td></tr>
+      <tr><td><code>describe</code></td><td><code>dict[int, PrototypeView]</code></td><td>鍵は発番済み id（集約・間引き済みも含む）。状態は <code>PrototypeView.resolution</code> が示す。未発番の id は鍵に現れない</td></tr>
+      <tr><td><code>resolve</code></td><td><code>dict[int, PrototypeResolution]</code></td><td>4 状態のいずれかを返す。未発番かどうかの判定はここで行う</td></tr>
+      <tr><td><code>find_prototypes</code></td><td><code>tuple[int, ...]</code></td><td>条件に一致する<strong>生存</strong>プロトタイプのみ。除外・集約済みの追跡は <code>resolve</code> の役割</td></tr>
+    </tbody>
+  </table>
+  <p><code>k &gt;= 1</code> の検証は <code>NormalSearchQuery</code> の構築時に行う。<code>SimilarityQuery</code> に <code>k</code> はなく、共通の <code>accept_query</code> に <code>k</code> を持たせると片方で意味を持たない引数になるためである。これにより、ポートの事前条件は型を作った時点で満たされる。</p>
+</section>
+
+<section id="persistence">
+  <h2>10. 永続化レイアウト</h2>
+<pre>&lt;store_dir&gt;/
+├── extractor_identity.json   抽出器同一性メタ。空ストアでは null
+├── prototypes.jsonl          1 行 1 プロトタイプ。発番済み全 id のレコード
+├── live_ids.npy              int64 (M,)。vectors.npy の行に対応する生存 id
+├── vectors.npy               float32 (M, D)。L2 正規化済み
+├── merged_into.json          集約前 id → 集約後 id の対応表
+└── journal.jsonl             1 行 1 操作記録（登録記録と間引き記録）</pre>
+  <p><code>&lt;store_dir&gt;.staging/</code> と <code>&lt;store_dir&gt;.previous/</code> は差し替えの途中だけ存在する作業ディレクトリで、正常終了後は残らない（<a href="#atomicity">7 章</a>）。</p>
+  <p>「持たないもの」にも理由がある。</p>
+  <ul class="tight">
+    <li><strong>除外状態の専用フィールドを持たない。</strong><code>prototypes.jsonl</code> にあって <code>live_ids.npy</code> にも <code>merged_into.json</code> にも現れない id が「間引きで除外済み」である。</li>
+    <li><strong>次の識別子を保存しない。</strong>発番済み id のレコードは削除しないので、最大値 + 1 で復元できる。</li>
+    <li><strong>バンクを保存しない。</strong>仕様とストア状態から決定的に再構築できる（要件 7.4）ため、権威を二重に持たない。</li>
+    <li><strong>スキーマ版フィールドを持たない。</strong>版管理は Phase 5 の対象で、本 spec でのレイアウト変更は再検証トリガーとして扱う。</li>
+  </ul>
+  <p>Flat 索引は保存した float32 ベクトルから決定的に再構築されるので、再読込後も同一クエリに同一結果を返す（要件 6.2）。</p>
+</section>
+
+<section id="ownership">
+  <h2>11. 所有と非所有</h2>
+  <table>
+    <thead><tr><th>関心事</th><th>所有者</th></tr></thead>
+    <tbody class="own-self">
+      <tr><td>識別子の発番と生存状態（生存・集約 retire・間引き除外）、集約前 → 集約後の対応表</td><td>本 spec（catalog.registry）</td></tr>
+      <tr><td>登録の受け入れ判定と拒否理由の報告契約</td><td>本 spec（catalog.admission）</td></tr>
+      <tr><td>集約判定と集約後プロトタイプの合成規則</td><td>本 spec（catalog.merging）</td></tr>
+      <tr><td>ベクトルの内部表現（L2 正規化した単位ベクトル）と距離・類似度の尺度定義</td><td>本 spec（権威。永続化の対象もこの表現）</td></tr>
+      <tr><td>検索対象集合の決定（種別除外・ドメイン限定・バンク限定）</td><td>本 spec（engine ＋ catalog）</td></tr>
+      <tr><td>間引きの対象決定・保護規則・上限の充足可能性判定</td><td>本 spec（catalog.pruning）</td></tr>
+      <tr><td>永続化形式と再読込時の整合検査、評価用バンクの構成、操作記録と期間照会</td><td>本 spec（boundary.snapshot_store / catalog.banks / catalog.journal）</td></tr>
+    </tbody>
+    <tbody>
+      <tr><td>特徴ベクトル・位置・ドメインタグ・由来キー・同一性メタの生成と正規化</td><td>ssl-vit-feature-extraction（本 spec は供給値を保持するだけ）</td></tr>
+      <tr><td>正常性の検証判断そのもの、注釈メタ・適用メタの意味解釈とスキーマ検証</td><td>llm-feedback-structuring / 呼び出し側（値は不透明な文字列マップとして素通し）</td></tr>
+      <tr><td>異常スコアの算出・しきい値の較正・ヒートマップ生成</td><td>primary-anomaly-detection</td></tr>
+      <tr><td>集約による id 変更への <code>match.prototype_ids</code> の追従</td><td>promptable-correction-layer（本 spec は対応表の保持と提示まで）</td></tr>
+      <tr><td>補正レコードからの参照有無に基づく間引き判断</td><td>誰も行わない（参照の有無を間引き条件に使わない。一方向依存を保つため）</td></tr>
+      <tr><td>過検出率・流出率・分布ずれの算出</td><td>evaluation-framework（本 spec は操作記録の提供まで）</td></tr>
+      <tr><td>バンクのスナップショット版管理・系譜</td><td>Phase 5</td></tr>
+    </tbody>
+  </table>
+  <p>既存の <code>correction_layer/boundary/prototype_store.py</code> は同じ問題（プロトタイプ id と埋め込みの kNN）を扱うが、不変の索引を作る読み取り専用の実装であり、増分追加・間引き・メタデータ層・永続化を持たない。本 spec はそれを置き換えず、<code>correction_layer</code> を一切変更しない。補正レイヤが注入する <code>SimilaritySource</code> の実装候補が将来増える、という関係にある（<code>similarities</code> は同じ意味のコサイン類似度を返す）。</p>
+</section>
+
+<section id="traceability">
+  <h2>12. 要件との対応</h2>
+  <table>
+    <thead><tr><th>要件</th><th class="num">基準</th><th>主要な実現手段</th></tr></thead>
+    <tbody>
+      <tr><td>1. パッチ特徴の登録と増分追加</td><td class="num">8</td><td>入口は <code>register</code> ひとつ。バッチ最近傍としきい値で新規／集約に振り分け、<code>RegistrationOutcome.prototype_ids</code> を入力パッチ行と同順で返す。次元不一致は <code>EmbeddingDimensionMismatchError</code></td></tr>
+      <tr><td>2. 正常性が担保されたデータだけを登録するガード</td><td class="num">7</td><td><code>evidence</code> を必須フィールドにし、種別との整合と供給ラベルとの整合を <code>admission</code> が検査。<code>kind=defect</code> は正常集合検索から常に外す</td></tr>
+      <tr><td>3. 近傍検索とドメイン限定</td><td class="num">8</td><td><code>search_normal</code> がコサイン距離で最大 k 件。<code>-1</code> パディングを除去するので k 未満なら全件。<code>domain</code> と <code>bank_id</code> は交差（<a href="#search">5 章</a>）</td></tr>
+      <tr><td>4. メタデータの保持と絞り込み</td><td class="num">6</td><td>登録記録を権威にし、<code>describe</code> が寄与ごとに登録記録付きのビューを返す。<code>find_prototypes</code> は条件一致の生存 id を返す。未提供は <code>None</code> か空マップのまま補完しない</td></tr>
+      <tr><td>5. coreset 再選択と expiry 間引き</td><td class="num">7</td><td>保護群（<code>pinned</code> または <code>defect</code>）を残して 4 分岐で処理（<a href="#prune">6 章</a>）。除外 id はレコードを残したまま生存集合から外れ、<code>resolve</code> が <code>PrunedPrototype</code> を返す</td></tr>
+      <tr><td>6. 永続化・再読込と抽出器同一性の互換判定</td><td class="num">6</td><td>ディレクトリ差し替えで保存し、pydantic 検証＋相互整合検査で読む。同一性メタは全フィールド比較し、不一致は登録時・検索時の双方で <code>ExtractorIdentityMismatchError</code></td></tr>
+      <tr><td>7. 評価用の固定サイズバンクの複数構築</td><td class="num">7</td><td>候補 id を昇順に並べ <code>numpy.random.default_rng(seed)</code> で非復元抽出。<code>defect</code> は候補に入れない。不足は <code>BankSizeUnavailableError</code> でバンクを作らない</td></tr>
+      <tr><td>8. 登録・間引き操作の記録</td><td class="num">4</td><td><code>OperationJournal</code> が登録記録と間引き記録を追記し、<code>operations(since, until)</code> が実施日時の昇順で返す。率の算出は境界外</td></tr>
+    </tbody>
+  </table>
+  <p>design.md のトレーサビリティ表は 1.1 から 8.4 まで欠番がない。境界外に置いた関心事（スコア算出・remap・指標算出・Phase 5 の版管理）はどの受入基準にも吸収していない。</p>
+</section>
+
+<section id="errors">
+  <h2>13. エラーの分類</h2>
+  <p>要件が「登録せず報告する」「検索を実行せず報告する」と定める経路は、すべて型付き例外で報告する。検査は状態変更の前に終わらせるので、例外が出たときに台帳と索引は変わらない。すべて <code>PatchFeatureStoreError</code> を継承し、呼び出し側がパッケージ単位で捕捉できる。</p>
+  <table>
+    <thead><tr><th>例外</th><th>送出条件</th><th>保持する情報</th></tr></thead>
+    <tbody>
+      <tr><td><code>EmbeddingDimensionMismatchError</code></td><td>登録済みの埋め込み次元と要求の次元が違う</td><td><code>expected_dim</code>, <code>actual_dim</code></td></tr>
+      <tr><td><code>NormalityEvidenceRequiredError</code></td><td>担保根拠が欠ける／種別と整合しない／データセット由来の根拠に対して供給ラベルが <code>ANOMALOUS</code></td><td><code>kind</code>, <code>reason</code></td></tr>
+      <tr><td><code>ExtractorIdentityMismatchError</code></td><td>抽出器同一性メタが一致しない（登録時・検索時の双方）</td><td><code>mismatches</code>（<code>IdentityMismatch(field, expected, actual)</code> の列。不一致項目をすべて含める）</td></tr>
+      <tr><td><code>SnapshotIntegrityError</code></td><td>読み取り失敗・スキーマ違反・相互不整合</td><td><code>target</code>（対象ファイルまたは検査項目）, <code>reason</code></td></tr>
+      <tr><td><code>CoresetSizeLimitError</code></td><td>保護群件数が上限を<strong>超える</strong>（等しい場合は成功経路なので送出しない）</td><td><code>protected_count</code>, <code>size_limit</code></td></tr>
+      <tr><td><code>BankSizeUnavailableError</code></td><td>候補が <code>size</code> に満たない（バンクは作らない）</td><td><code>bank_id</code>, <code>requested_size</code>, <code>available_count</code></td></tr>
+      <tr><td><code>UnknownBankError</code></td><td>未構築のバンクを検索・照会で指定した</td><td><code>bank_id</code></td></tr>
+      <tr><td><code>ValueError</code></td><td>数値契約違反（非有限値・ゼロノルム・形状不一致）は <code>admission</code>、<code>k &lt; 1</code> は <code>NormalSearchQuery</code> の構築時</td><td>—（上流契約で保証されるべき入力の逸脱。既存 <code>PrototypeStore</code> の扱いに揃える）</td></tr>
+    </tbody>
+  </table>
+  <p>観測の一次手段は操作記録である。登録・間引きの実施日時と対象識別子が残るので、下流の <code>evaluation-framework</code> が追加前後の流出率・過検出率の変化を突き合わせられる。本パッケージ自身はログ出力を持たない。</p>
+</section>
+
+<section id="contracts">
+  <h2>14. import-linter 契約</h2>
+  <p><code>pyproject.toml</code> の <code>root_packages</code> に <code>patch_feature_store</code> を加え、7 つの契約で依存方向を CI 検査する。<code>src/</code> の既存パッケージ・<code>docs/</code>・<code>.kiro/steering/</code> は変更しない。</p>
+  <table>
+    <thead><tr><th class="num">#</th><th>種別</th><th>内容</th><th>守るもの</th></tr></thead>
+    <tbody>
+      <tr><td class="num">1</td><td>layers</td><td><code>engine</code> &gt; <code>boundary | catalog</code> &gt; <code>model</code></td><td>層の逆流と <code>catalog</code> ⇄ <code>boundary</code> の相互 import の禁止</td></tr>
+      <tr><td class="num">2</td><td>independence</td><td><code>catalog</code> の 6 モジュール</td><td>台帳同士を結合させず、配線を <code>engine</code> に集める</td></tr>
+      <tr><td class="num">3</td><td>layers</td><td><code>model</code> の 11 モジュールを 7 段に並べる（<code>ports</code> → <code>snapshot</code> → <code>prototype</code> → <code>registration | operations | bank</code> → <code>query</code> → <code>errors</code> → <code>criteria | config | types</code>）</td><td>型定義の循環の防止</td></tr>
+      <tr><td class="num">4</td><td>forbidden</td><td><code>model</code>・<code>catalog</code>・<code>engine</code> から <code>faiss</code>・<code>torch</code>・<code>anomalib</code></td><td>重い外部依存を <code>boundary</code> に閉じる（中心的な不変条件）</td></tr>
+      <tr><td class="num">5</td><td>layers</td><td><code>snapshot_store | faiss_index | anomalib_coreset | clock</code> &gt; <code>snapshot_schema</code></td><td>アダプタ同士の相互 import の禁止（永続化アダプタが FAISS に触らない）</td></tr>
+      <tr><td class="num">6</td><td>forbidden</td><td><code>correction_layer</code>・<code>feature_extraction</code> から <code>patch_feature_store</code></td><td>パッケージ間の依存方向を一方向に固定</td></tr>
+      <tr><td class="num">7</td><td>forbidden</td><td><code>patch_feature_store</code> から <code>correction_layer</code></td><td>契約 6 の逆向き。両方揃って初めて「<code>correction_layer</code> と相互依存しない」が検査される（<code>feature_extraction</code> への依存は許可）</td></tr>
+    </tbody>
+  </table>
+  <p>同一層を区切る <code>|</code> は import-linter の independent 指定であり、<strong>同一層のモジュール同士の import も禁止される</strong>。したがって依存があるモジュールは層順で解く必要がある（例: <code>PrototypeContributionView</code> が <code>RegistrationRecord</code> を持つので <code>model.prototype</code> は <code>model.operations</code> の上位）。また <code>layers</code> 契約は列挙したモジュールが存在しないと <code>Missing layer</code> で失敗するため、契約の追加は全モジュール作成後に行う。</p>
+</section>
+
+<section id="tests">
+  <h2>15. テスト計画</h2>
+  <div class="bars">
+    <span>Unit</span><span class="track"><span class="fill" style="width:83%"></span></span><span class="v">10 項目</span>
+    <span>Property（hypothesis）</span><span class="track"><span class="fill" style="width:25%"></span></span><span class="v">3 項目</span>
+    <span>Integration</span><span class="track"><span class="fill" style="width:100%"></span></span><span class="v">12 項目</span>
+    <span>End-to-End</span><span class="track"><span class="fill" style="width:8%"></span></span><span class="v">1 項目</span>
+  </div>
+  <p style="margin-top:12px">棒の長さは design.md「Testing Strategy」の箇条書き件数（最大 12 を全幅とする相対表示）。1 項目が複数の検証を含む。テストファイルは 14 本。</p>
+  <table>
+    <thead><tr><th>種別</th><th>代表的な確認内容</th></tr></thead>
+    <tbody>
+      <tr><td>Unit</td><td>担保根拠と種別の整合／供給ラベル拒否、しきい値の等号境界と併合規則、間引き 4 分岐の区分判定、<code>plan_*</code> だけでは台帳が変わらず <code>apply</code> で初めて反映されること、包含・除外セレクタの切り替え、無指定軸の一致規則、<code>k &lt;= 0</code> の拒否、<code>__all__</code> の網羅性と非公開名の不在、ポートの各メンバーに消費側があること</td></tr>
+      <tr><td>Property</td><td>任意の操作列で id が再利用されないこと、<code>resolve</code> が有限回で終端に達すること（循環しない）、同一仕様・同一状態のバンク構築が集合として等価であること</td></tr>
+      <tr><td>Integration</td><td>FAISS 実物での登録→検索（追記後も同一 id）、集約後の <code>similarities</code> が対応先を提示すること、保護属性と失効期限が集約で弱まらないこと、<code>domain</code> × <code>bank_id</code> の交差だけが返ること、<code>add</code> / <code>remove</code> で失敗する代替索引を注入したとき台帳・記録が要求前と一致すること、<code>previous</code> だけが残る状態からの復旧、4 分岐での selector 呼び出し回数、<code>exclude=None</code> で除外が起きないこと</td></tr>
+      <tr><td>End-to-End</td><td>合成した <code>PatchFeatureSet</code> での通し（初期一括登録 → 追加登録で集約 → expiry 間引き → 実 coreset 選択 → 永続化 → 再読込 → バンク構築 → バンク指定検索 → 期間照会）。torch と anomalib を読み込むため他のテストから分離する</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="performance">
+  <h2>16. 性能とスケール</h2>
+  <p>実測（faiss-cpu 1.14.3、WSL2 CPU、D=384）: 50 万件への <code>add</code> が 0.38 秒、1024 クエリ・k=1 のバッチ検索が 8.27 秒（1 クエリ約 8 ミリ秒）。除外セレクタ付きは 7.87 秒、生存の半数を包含するセレクタ付きは 5.97 秒。</p>
+  <div class="note">
+    <h3>1 画像の全パッチ登録は成立しない</h3>
+    <ul>
+      <li>登録費用は <code>O(登録パッチ数 × 生存件数 × 次元)</code>。8000 × 8000 画像 1 枚（タイル 512・ストライド 16 で約 26 万パッチ）をそのまま登録すると<strong>約 35 分</strong>かかる。</li>
+      <li>したがって呼び出し側が登録対象を絞るか、coreset 再選択で上限を保つ必要がある。上限値そのものは運用（<code>evaluation-framework</code> のストア規模スイープ）で決める。</li>
+    </ul>
+  </div>
+  <ul class="tight">
+    <li>メモリは生存件数 × 次元 × 4 バイト（50 万件・384 次元で 0.77 GB）に、寄与とレコードの Python オブジェクトが加わる。DGX Spark の 128 GB 統一メモリを前提とする。</li>
+    <li>coreset 選択は候補ベクトル全体を取り出して torch テンソルへ移すため、選択時に索引と同規模の一時メモリを要する。</li>
+    <li><code>find_prototypes</code> とドメイン限定検索は、登録記録の絞り込み（登録件数に比例）とプロトタイプ走査（生存件数に比例）を伴う。1 クエリの近傍探索より重くなる場合があるため、ドメイン限定は任意指定に留める（既定は単一プール）。</li>
+  </ul>
+</section>
+
+<section id="retrigger">
+  <h2>17. 再検証トリガー</h2>
+  <div class="note">
+    <h3>次のいずれかを変えるときは設計の再確認が必要</h3>
+    <ul>
+      <li><code>PrototypeRecord</code> / <code>RegistrationRecord</code> / <code>NeighborHit</code> / <code>SimilarityLookup</code> / <code>BankComposition</code> のフィールド追加・削除・意味変更</li>
+      <li>距離尺度の変更（コサイン距離 = 1 − 類似度、内部表現は L2 正規化済みベクトル）— 補正レイヤの <code>match.similarity_threshold</code> の解釈に直結する</li>
+      <li>集約時に新識別子を発番する方針（既存識別子を継続しない）の変更 — 補正レイヤの remap 追従の前提が変わる</li>
+      <li>索引方式を Flat から近似索引（IVF／PQ）へ変更すること — 厳密解でなくなり要件 3.1／6.2 の前提が変わる</li>
+      <li>永続化ディレクトリのファイル構成・ファイル名・レコード形式の変更</li>
+      <li>間引き規則（保護対象、上限の充足可能性判定）の変更</li>
+      <li>バンクを永続化対象に含める変更（現設計はプロセス内の派生物として扱う）</li>
+      <li>上流 <code>feature_extraction</code> の <code>ExtractorIdentity</code> へのフィールド追加 — 互換判定の比較対象が変わる</li>
+      <li>注釈メタ・適用メタのスキーマ確定（現在は不透明な文字列マップとして素通ししている）</li>
+    </ul>
+  </div>
+</section>
+
+<footer>
+  <p>参照: <code>.kiro/specs/patch-feature-store/design.md</code>（正典）／<code>research.md</code>（FAISS・anomalib の実測と代替案の比較）／<code>requirements.md</code>（要件 8 件・受入基準 53 件）。上流は <a href="ssl-vit-feature-extraction-design-overview.html">ssl-vit-feature-extraction 設計サマリ</a>。</p>
+</footer>
+
+</main>
+</div>
+</body>
+</html>
