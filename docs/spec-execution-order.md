@@ -10,8 +10,8 @@ roadmap の依存順（ssl-vit → store → primary → llm → correction → 
 実施が完了した項目にチェックを付ける。
 
 1. [x] **promptable-correction-layer（前半）**（開発計画 Phase 0–3 の範囲に限定）
-2. [ ] **ssl-vit-feature-extraction**
-3. [ ] **patch-feature-store**（着手前に Lance / LanceDB スパイク判断）
+2. [x] **ssl-vit-feature-extraction**
+3. [x] **patch-feature-store**（Lance / LanceDB スパイク判断は bank 版管理＝補正レイヤ Phase 5 送り）
 4. [ ] **primary-anomaly-detection**（完了条件に
    [VisA 検証ゲート](./visa-validation-gate.md) を置く）
 5. [ ] **llm-feedback-structuring**
@@ -47,8 +47,9 @@ primary-anomaly-detection の後に置くことで、実データでの E2E 確�
 ssl-vit-feature-extraction → patch-feature-store → primary-anomaly-detection は
 データ契約（特徴テンソル → ストアレコード → スコア/ROI）の直列依存であり、
 入れ替える理由がない。[milestones.md](./milestones.md) の「SSL特徴＋ストア基盤」
-「一次検出＋抽出器比較」の順序とも一致する。patch-feature-store の bank 版管理に入る前に Lance / LanceDB
-スパイク（1〜2 日）を実施し、採否を決めてから設計を確定する
+「一次検出＋抽出器比較」の順序とも一致する。Lance / LanceDB スパイク（1〜2 日）は
+patch-feature-store の初回実装では行わず、bank 版管理（補正レイヤ Phase 5）に入る前へ送る。
+初回実装は FAISS Flat＋自作の台帳層で確定させ、置き換えの採否はスパイク時に判断する
 （[ライブラリ採用提案 §3](./library-adoption-proposal.md)。補正レイヤ Phase 5 の
 自作範囲にも影響する）。
 
@@ -84,7 +85,7 @@ primary-anomaly-detection と並行して前倒しする。
 | ---- | ----------------------------------- | --------------------------------------------- |
 | 1    | promptable-correction-layer（前半） | Phase 0–3（合成データ、前倒し可）             |
 | 2    | ssl-vit-feature-extraction          | 「SSL特徴＋ストア基盤」の前提                 |
-| 3    | patch-feature-store                 | 「SSL特徴＋ストア基盤」。Lance スパイク判断点 |
+| 3    | patch-feature-store                 | 「SSL特徴＋ストア基盤」。Lance 判断は Phase 5 |
 | 4    | primary-anomaly-detection           | 「一次検出＋抽出器比較」。VisA 検証ゲート     |
 | 5    | llm-feedback-structuring            | 「HITL＋補正レイヤ」                          |
 | 6    | evaluation-framework                | Phase 8 の回帰ゲート（最小指標は 4 で前倒し） |
