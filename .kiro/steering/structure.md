@@ -8,16 +8,18 @@
   判定ロジック）へ向ける。将来の `versioning`／`ontology`／`app` もこの向きを崩さない
 - **実装は層＋合成** — 各パッケージ内は model（型・port）→ 中間層 → engine（または app）の
   一方向。中間層の名前は関心事で決める（判定なら `decision`、幾何計算なら `geometry`、
-  外部 I/O・外部ライブラリなら `boundary`）。同じ中間層のモジュール同士は互いに import しない
+  台帳と純粋ロジックなら `catalog`、外部 I/O・外部ライブラリなら `boundary`）。
+  同じ中間層のモジュール同士は互いに import しない
 
 ## Directory Patterns
 
 ### Application packages
 
 **Location**: `src/{package}/`  
-**Purpose**: 実行可能な機能単位。実装例は `correction_layer`・`feature_extraction`  
-**Example**: `model/`・`boundary/`・関心事別の中間層（`decision/`／`geometry/`）・`engine.py`・
-公開 `__init__.py`
+**Purpose**: 実行可能な機能単位。実装例は `correction_layer`・`feature_extraction`・
+`patch_feature_store`  
+**Example**: `model/`・`boundary/`・関心事別の中間層（`decision/`／`geometry/`／`catalog/`）・
+`engine.py`（必要なら `engine_snapshot.py` のような第 2 段）・公開 `__init__.py`
 
 ### Tests next to contract
 
@@ -46,6 +48,8 @@
 - **port 実装の入口**: boundary は snake_case のファクトリ関数で公開し、返り値を Protocol 型で
   受ける（`timm_patch_extractor`、`visa_image_source`）。具象クラス名は公開面の契約にしない
 - **テスト関数**: `test_should_...`（`test_should_reject_invalid_overlap`）
+- **テストファイル**: `tests/` は平坦なので、パッケージを表す接頭辞で名前衝突を避ける
+  （`test_store_registry.py`、`test_feature_config.py`）
 - **ドメイン軸・スキーマフィールド**: 設計メモの語彙をそのまま（`element_id`、`prototype_ids`）
 - **spec 名**: kebab-case（`promptable-correction-layer`）
 
@@ -58,10 +62,12 @@ from correction_layer.decision.primary import judge_primary
 ```
 
 - パッケージルートからの絶対 import（`correction_layer...`）を使う
-- 中間層同士（`boundary` ⇄ `decision`／`geometry`）の相互 import 禁止。配線は `engine`／
-  テスト組み立て側
+- 中間層同士（`boundary` ⇄ `decision`／`geometry`／`catalog`）の相互 import 禁止。
+  配線は `engine`／テスト組み立て側
 - 具象ストアや Loader を engine が直接型依存しない。port と注入で閉じる
-- torch／timm／anomalib の import は `boundary` 限定。model・geometry・engine は numpy で書く
+- torch／timm／anomalib／faiss の import は `boundary` 限定。model・geometry・catalog・engine は
+  numpy で書く
+- パッケージ間 import も一方向。上流の型は自パッケージの model で受け直し、相互依存を作らない
 
 ## Code Organization Principles
 
@@ -71,3 +77,6 @@ from correction_layer.decision.primary import judge_primary
    ルート公開してよいが、engine の型注釈は port 側に置く
 4. **新規パッケージも同じ層パターン** — `src/` に増える単位は roadmap の spec／
    `docs/package-dependency-direction.md` の塊に対応させる
+5. **engine が膨らんだら段を足す** — composition root が大きくなったら関心事を第 2 段の
+   モジュールへ移し（例: スナップショット組み立て → `engine_snapshot.py`）、
+   layers 契約にもその段を書いて上下関係を固定する

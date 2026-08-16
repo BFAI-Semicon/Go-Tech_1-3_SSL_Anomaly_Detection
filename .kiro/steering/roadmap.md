@@ -87,7 +87,7 @@ FAISS ベースの特徴量ストア、HITL（ROI 注釈＋自然言語コメン
 ## Specs (dependency order)
 
 - [x] ssl-vit-feature-extraction -- データセット入力アダプタ、タイル化・パッチ化と固定 SSL ViT（DINOv3 主軸。anomalib TimmFeatureExtractor）によるパッチ特徴抽出. Dependencies: none
-- [ ] patch-feature-store -- FAISS kNN インデックス＋ドメイン分割・coreset・増分追加を備えた特徴量ストア. Dependencies: ssl-vit-feature-extraction
+- [x] patch-feature-store -- FAISS kNN インデックス＋ドメイン分割・coreset・増分追加を備えた特徴量ストア. Dependencies: ssl-vit-feature-extraction
 - [ ] primary-anomaly-detection -- Mahalanobis／kNN 距離の融合による異常スコア化・ヒートマップ・ROI 候補抽出. Dependencies: ssl-vit-feature-extraction, patch-feature-store
   - 完了条件に VisA 検証ゲート（メモリバンク構築 → 一次検出 → 最小指標の通し実行）を置く
     （`docs/visa-validation-gate.md`）。
