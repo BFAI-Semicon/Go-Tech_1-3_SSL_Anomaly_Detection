@@ -7,9 +7,9 @@
 
 ## 現状の実装
 
-動いているのは **補正レイヤ本体（開発計画 Phase 0–3）** と **パッチ特徴抽出** の 2 パッケージです。
-特徴量ストア・一次検出・HITL／LLM 構造化・バージョン管理・オントロジー統合は未着手で、
-両パッケージはまだ接続されていません。
+動いているのは **補正レイヤ本体（開発計画 Phase 0–3）**・**パッチ特徴抽出**・**パッチ特徴ストア** の
+3 パッケージです。一次検出・HITL／LLM 構造化・評価基盤・バージョン管理・オントロジー統合は未着手で、
+3 パッケージを通す合成ルート（パイプライン）はまだありません。
 
 ### `src/correction_layer/` — 補正レイヤ
 
@@ -34,12 +34,32 @@
 - torch／timm／anomalib の import は `boundary` に閉じ、`import-linter` で強制
 - 仕様: `.kiro/specs/ssl-vit-feature-extraction/`（全タスク完了）
 
+### `src/patch_feature_store/` — パッチ特徴ストア
+
+抽出したパッチ特徴を FAISS Flat で保持し、正常近傍探索・プロトタイプの増分登録と集約・coreset 再選抜・
+期限切れ剪定・バンク構成・スナップショットの保存／復元までを完結します。
+
+- 層: `model`／`boundary`／`catalog`／`engine`（スナップショット組み立ては `engine_snapshot.py`）
+- 公開 API: `PatchFeatureStore` と port 実装（`faiss_flat_index`・`anomalib_coreset_selector`・
+  `directory_snapshot_repository`・`utc_clock`）、要求・結果型（`RegistrationRequest`／
+  `NormalSearchQuery`／`SimilarityQuery`／`BankSpec`／`DomainCriteria` 等）
+- 距離はコサイン固定（保持ベクトルは L2 正規化済み）。近傍探索は距離、識別子指定の問い合わせは
+  類似度を返す
+- プロトタイプ識別子は単調増加・非再利用。集約時は新しい id を発番して旧→新の対応表を残すので、
+  下流は古い id からでも現在の実体をたどれる
+- 状態変更は準備→コミットの 2 段。保存は `.staging`／`.previous` を使ったディレクトリ差し替えで、
+  部分適用を残さない
+- coreset 選択は anomalib `KCenterGreedy`。`faiss`／`torch`／`anomalib` の import は `boundary` に閉じ、
+  `import-linter` で強制
+- 仕様: `.kiro/specs/patch-feature-store/`（全タスク完了。設計要約は
+  [`docs/patch-feature-store-design-overview.html`](docs/patch-feature-store-design-overview.html)）
+
 ### 検証状態
 
-- `uv run pytest` — 279 passed（`tests/`。合成 fixture 中心）
-- `PYTHONPATH=src uv run lint-imports` — 依存方向 9 契約が KEPT
+- `uv run pytest` — 592 passed（`tests/`。合成 fixture 中心）
+- `PYTHONPATH=src uv run lint-imports` — 依存方向 16 契約が KEPT
 - CI: `.github/workflows/python-ci.yml`（ruff・`lint-imports`・pytest）
-- 次: [`docs/spec-execution-order.md`](docs/spec-execution-order.md) の順で `patch-feature-store` へ
+- 次: [`docs/spec-execution-order.md`](docs/spec-execution-order.md) の順で `primary-anomaly-detection` へ
 
 ```bash
 mise run sync-dev   # 未同期の場合
@@ -120,7 +140,7 @@ echo $VIRTUAL_ENV   # .venv のパスが表示されれば有効
 ## 補足・注意
 
 - **anomalib は PyPI の `>=2.6,<3`** を使用します（DINOv3 は `TimmFeatureExtractor` 経由。
-  特徴抽出・データ読み込み・評価指標に利用し、ストア・スコア化は自前）。
+  特徴抽出・データ読み込み・評価指標・coreset 選択に利用し、ストア本体・スコア化は自前）。
 - **FAISS は `faiss-cpu`** を使用します（aarch64 では GPU 版 wheel が未提供のため）。
 - `.venv` はリポジトリに含めません。`mise run sync` でいつでも再構築できます。
 - 方針・依存方向・段階計画は [`.kiro/steering/`](.kiro/steering/) と [`docs/index.md`](docs/index.md) を参照してください。
@@ -138,14 +158,21 @@ echo $VIRTUAL_ENV   # .venv のパスが表示されれば有効
 │   │   ├── boundary/         # スキーマ検証・PrototypeStore・ドメインロード
 │   │   ├── decision/         # 一次判定・照合・解決・補正
 │   │   └── engine.py         # composition root
-│   └── feature_extraction/   # パッチ特徴抽出（実装済み）
-│       ├── model/            # 入力型・設定・port
-│       ├── boundary/         # timm/anomalib アダプタ・抽出器同一性
-│       ├── geometry/         # タイル配置・パッチ座標
-│       └── engine.py         # composition root
+│   ├── feature_extraction/   # パッチ特徴抽出（実装済み）
+│   │   ├── model/            # 入力型・設定・port
+│   │   ├── boundary/         # timm/anomalib アダプタ・抽出器同一性
+│   │   ├── geometry/         # タイル配置・パッチ座標
+│   │   └── engine.py         # composition root
+│   └── patch_feature_store/  # パッチ特徴ストア（実装済み）
+│       ├── model/            # プロトタイプ・問い合わせ・設定・port
+│       ├── boundary/         # FAISS・coreset・スナップショット入出力・時刻
+│       ├── catalog/          # 台帳・受理・集約・剪定・バンク・操作履歴
+│       ├── engine.py         # composition root
+│       └── engine_snapshot.py # スナップショットの組み立てと適用
 ├── tests/                    # pytest（合成 fixture 含む）
 ├── scripts/
-│   └── prepare-python.sh     # takt worktree 用の環境準備スクリプト
+│   ├── prepare-python.sh     # takt worktree 用の環境準備スクリプト
+│   └── http_server.sh        # docs/ を配信するローカル HTTP サーバ
 ├── docs/                     # 研究概要・手順・設計メモ
 ├── .github/workflows/        # python-ci / markdownlint
 └── .kiro/                    # steering・specs（仕様駆動開発）
