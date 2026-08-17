@@ -458,7 +458,7 @@ sequenceDiagram
 | 9.1 | `boundary/dataset_guard.py`, `model/errors.py` | ルート不在で `DatasetRootMissingError` |
 | 9.2 | `visa_gate/cli.py`, `model/config.py` | `--download` 既定 false |
 | 9.3 | `boundary/dataset_guard.py` | 未取得かつ未許可で `DatasetNotPreparedError` |
-| 9.4 | `boundary/dataset_guard.py` | 書込不可で `DatasetLocationNotWritableError` |
+| 9.4 | `boundary/dataset_guard.py` | 分割未適用・未取得で書込不可なら `DatasetLocationNotWritableError` |
 | 9.5 | `primary_anomaly_detection/engine.py`, `visa_gate/gate.py` | `detect()` 冒頭で同一性照合し送出 |
 | 10.1 | `visa_gate/gate.py`, `visa_gate/__init__.py` | `run_visa_gate()` を公開し import 可能 |
 | 10.2 | `tests/test_visa_gate_e2e.py` | データ未取得時は `pytest.skip` |
@@ -1094,27 +1094,36 @@ Requirement 8.1 が挙げる引数集合を最小に保つためである。固�
 
 - **`visa_image_source()` を呼ぶ前に実行する**。同関数は内部で `prepare_data()` を呼び、
   未取得なら確認なしに約 16GB のダウンロードを開始するため、検証を後段に置けない。
-- 検証順序: (1) `data_root` がディレクトリとして存在するか（Req 9.1）、
-  (2) 下記 3 配置のいずれかで `{category}` が存在するか、
-  (3) 未準備かつ `allow_download` が false ならエラー（Req 9.3）、
-  (4) 未準備で準備を許可する場合、`data_root` が書き込み可能か（Req 9.4）。
-- **準備済みと認める配置は 3 つで、解決した root を戻り値で返す**。`visa_image_source()` に
-  渡す root を guard 自身が決めることで、guard の判定と抽出の入力が食い違わないようにする。
+- `data_root` がディレクトリとして存在しなければ、配置判定に入る前にエラー（Req 9.1）。
+- **配置は下表を上から順に判定し、最初に一致したものを採る（first-match）**。複数の配置が
+  同時に存在しても返す root が一意に決まるようにするため、「いずれかに一致」ではなく順序付きの
+  判定として定義する。`visa_image_source()` に渡す root を guard 自身が決めることで、
+  guard の判定と抽出の入力が食い違わないようにする。
 
-  | 配置 | 返す root |
-  | --- | --- |
-  | `data_root/visa_pytorch/{category}` | `data_root` |
-  | `data_root/{category}` | `data_root` |
-  | `data_root/VisA_pytorch/1cls/{category}` | `data_root/VisA_pytorch/1cls` |
+  | # | 一致条件 | 返す root | 書き込み | 状態 |
+  | --- | --- | --- | --- | --- |
+  | 1 | `data_root/visa_pytorch/{category}` | `data_root` | 不要 | 分割済み |
+  | 2 | `data_root/VisA_pytorch/1cls/{category}` | `data_root/VisA_pytorch/1cls` | 不要 | 配布元の前処理済み |
+  | 3 | `data_root/{category}` | `data_root` | **必要** | 取得済み・分割未適用 |
+  | 4 | 上記いずれにも一致しない | `data_root` | **必要** | 未取得 |
 
-  3 つ目は配布元の `prepare_data.py` が作るレイアウトで、anomalib は
-  `{root}/visa_pytorch/{category}` と `{root}/{category}` だけを見るため、`1cls` を root として
-  渡すと 2 つ目の経路で認識される（`docs/visa-validation-gate.md:112-114`、
-  `research.md` の「VisA の 1cls レイアウト不一致」）。前処理済みデータの流用時に
-  再ダウンロードも再複製も起こさないための経路である。
-- 未準備のときは `data_root` を返す。anomalib が `data_root/visa_pytorch/` を作って複製する。
-- 準備済みの場合は書き込み可否を要求しない。読み取り専用ストレージ上の準備済みデータで
-  ゲートを回せるようにするため。
+- 順序の根拠。#1 を先頭にするのは anomalib 自身の判定順（`visa_pytorch/{category}` →
+  `{category}`、`anomalib/data/datamodules/image/visa.py:180-191`）に合わせ、`data_root` を
+  渡したときに anomalib が選ぶ経路と一致させるためである。#2 を #3 より先にするのは、
+  #3 が複製と書き込みを伴う一方 #2 は伴わないためで、破壊的書き込みを避ける
+  Requirement 9 の目的に沿う。#2 は配布元の `prepare_data.py` が作るレイアウトで、
+  anomalib は `{root}/visa_pytorch/{category}` と `{root}/{category}` しか見ないため、
+  guard が root を `.../1cls` へ読み替えて #1 相当の経路に乗せるしかない
+  （`docs/visa-validation-gate.md:112-114`、`research.md` の「VisA の 1cls レイアウト不一致」）。
+- **#3 と #4 は書き込み可否を検証する**（Req 9.4）。`apply_cls1_split()` は
+  `data_root/split_csv/1cls.csv` を読んで `data_root/visa_pytorch/` へ画像を複製し、
+  `--category` を絞っても初回は 12 カテゴリ分すべてを処理する（ゲート文書の既知の罠 2）。
+  #3 は取得済みなのでダウンロードは起きず Req 9.3 のエラー対象ではないが、
+  準備に書き込みが必要な状態であり、Req 9.4 の検証対象になる。
+- **#1 と #2 は書き込み可否を要求しない**。読み取り専用ストレージ上の分割済みデータで
+  ゲートを回せるようにするためである。
+- #4 で `allow_download` が false ならエラー（Req 9.3）。true のときは `data_root` を返し、
+  anomalib が `data_root/visa_pytorch/` を作って複製する。
 
 ##### Service Interface (DatasetGuard)
 
@@ -1405,10 +1414,18 @@ CLI は実行ディレクトリのパス、登録パッチ数、スコア化画�
 - `GATE_BACKBONE_PRESETS` の 4 件すべてが `BackboneConfig` / `TilingConfig` として構築でき、
   キー集合が CLI の `choices` と一致する（Req 8.1, 8.5）。プリセットが完全形であること、
   および `TOKENS` の `feature_layer` が `blocks.<int>` 形式であることを構築時検証で固定する。
-- `resolve_prepared_visa_root` が 3 配置それぞれに対して正しい root を返す（Req 9.3）。
+- `resolve_prepared_visa_root` が 4 ケースそれぞれに対して正しい root を返す（Req 9.3）。
   とくに `data_root/VisA_pytorch/1cls/{category}` の配置で `data_root/VisA_pytorch/1cls` を
-  返し、`data_root` を返さないことを固定する。guard が準備済みと認めた配置と
+  返し、`data_root` を返さないことを固定する。guard が認めた配置と
   `visa_image_source()` へ渡す root が食い違わないことの回帰点。
+- `resolve_prepared_visa_root` が**複数配置の同時存在で first-match 順に従う**（Req 9.3）。
+  #1 と #2 が両方ある場合は `data_root`、#2 と #3 が両方ある場合は
+  `data_root/VisA_pytorch/1cls` を返す。3 配置すべてが存在するケースも 1 本置く。
+  順序が実装者判断に委ねられていないことを固定する。
+- `resolve_prepared_visa_root` が #3（`data_root/{category}` のみ）で書き込み不可のときに
+  `DatasetLocationNotWritableError` を返し、#1 / #2 では書き込み不可でも成功する（Req 9.4）。
+  分割未適用の状態は `apply_cls1_split()` の複製が走るため書き込みが必要である一方、
+  分割済みと 1cls 済みは読み取り専用でも回せることを固定する。
 - `primary_anomaly_detection` の公開面が「公開する面」の 12 シンボルと一致し、
   `knn_scores` / `fuse_scores` / `compose_heatmap` / `extract_roi_candidates` /
   `l2_normalize_rows` を公開しない（`visa_gate` が中間層モジュールを直接 import しないことの

@@ -218,7 +218,7 @@
     <div class="stat"><b>46</b><span>受入基準</span></div>
     <div class="stat"><b>14</b><span>コンポーネント</span></div>
     <div class="stat"><b>25</b><span>新規モジュール</span></div>
-    <div class="stat"><b>41</b><span>計画テスト</span></div>
+    <div class="stat"><b>43</b><span>計画テスト</span></div>
   </div>
 </section>
 
@@ -524,7 +524,7 @@ src/visa_gate/
 
   <h3>実行順序</h3>
   <ol class="steps">
-    <li><strong>実行前検証と root の解決</strong> — <code>data_root</code> の存在 → カテゴリの準備状態 → 未準備かつ未許可ならエラー → 準備するなら書き込み可否。<code>visa_image_source()</code> は内部で <code>prepare_data()</code> を呼び、未取得なら確認なしに約 16GB のダウンロードを始めるため、<strong>検証を後段に置けない</strong>。<code>resolve_prepared_visa_root()</code> は判定と同時に「anomalib へ渡す root」を返し、guard の判定と抽出の入力が食い違わないようにする。<br>準備済みと認める配置は 3 つ： <code>data_root/visa_pytorch/{category}</code> と <code>data_root/{category}</code> は <code>data_root</code> を返し、配布元の前処理済みレイアウト <code>data_root/VisA_pytorch/1cls/{category}</code> は <code>data_root/VisA_pytorch/1cls</code> を返す（anomalib はこれを 2 つ目の経路として認識する）。</li>
+    <li><strong>実行前検証と root の解決</strong> — <code>visa_image_source()</code> は内部で <code>prepare_data()</code> を呼び、未取得なら確認なしに約 16GB のダウンロードを始めるため、<strong>検証を後段に置けない</strong>。<code>resolve_prepared_visa_root()</code> は判定と同時に「anomalib へ渡す root」を返し、guard の判定と抽出の入力が食い違わないようにする。<code>data_root</code> 自体が無ければ配置判定に入る前にエラー。</li>
     <li><strong>実行ディレクトリの採番</strong> — <code>{category}__{backbone}</code>、既存なら <code>-2</code>, <code>-3</code>, ... の未使用最小連番。時刻を使わないので決定的で、既存結果を上書きしない。</li>
     <li><strong>train/good の抽出</strong> — 画像ソースと抽出エンジンを組み立ててパッチ特徴を得る。</li>
     <li><strong>二重利用</strong> — 同じ抽出結果を (a) 既知正常としてストアへ一括登録、(b) Mahalanobis 較正の入力として渡す。どちらも<strong>そのまま渡す</strong>（L2 正規化は受け手が各々行う）。</li>
@@ -533,6 +533,20 @@ src/visa_gate/
     <li><strong>test 分割の各画像</strong> — 抽出 → 検出 → スコアマップと ROI を保存。</li>
     <li><strong>指標</strong> — image-level スコアはゲート側で <code>heatmap.max()</code> として求め、port へ渡す。<code>image_level_auroc &lt; 0.9</code> なら <code>below_provisional_floor</code> を true にする（警告であって失敗ではない）。</li>
   </ol>
+
+  <h3>配置の判定は first-match（上から順）</h3>
+  <p>複数の配置が同時に存在しても返す root が一意に決まるよう、「いずれかに一致」ではなく順序付きで定義します。</p>
+  <table>
+    <thead><tr><th>#</th><th>一致条件</th><th>返す root</th><th>書き込み</th><th>状態</th></tr></thead>
+    <tbody>
+      <tr><td class="num">1</td><td class="k">data_root/visa_pytorch/{category}</td><td class="k">data_root</td><td>不要</td><td>分割済み</td></tr>
+      <tr><td class="num">2</td><td class="k">data_root/VisA_pytorch/1cls/{category}</td><td class="k">data_root/VisA_pytorch/1cls</td><td>不要</td><td>配布元の前処理済み</td></tr>
+      <tr><td class="num">3</td><td class="k">data_root/{category}</td><td class="k">data_root</td><td><strong>必要</strong></td><td>取得済み・分割未適用</td></tr>
+      <tr><td class="num">4</td><td>いずれにも一致しない</td><td class="k">data_root</td><td><strong>必要</strong></td><td>未取得（未許可ならエラー）</td></tr>
+    </tbody>
+  </table>
+  <p>#1 を先頭にするのは anomalib 自身の判定順（<code>visa_pytorch/{category}</code> → <code>{category}</code>）に合わせ、<code>data_root</code> を渡したときに anomalib が選ぶ経路と一致させるため。#2 を #3 より先にするのは、#3 だけが複製と書き込みを伴うためです。</p>
+  <p><strong>書き込み可否を検証するのは #3 と #4</strong>。<code>apply_cls1_split()</code> は <code>data_root/visa_pytorch/</code> へ画像を複製し、<code>--category</code> を絞っても初回は 12 カテゴリ分すべてを処理します。#3 は取得済みなのでダウンロードは起きませんが、準備に書き込みが必要な状態なので Req 9.4 の対象です。#1 と #2 は読み取り専用ストレージでも回せます。</p>
 
   <h3>CLI 引数は 5 つだけ</h3>
   <table>
@@ -774,12 +788,12 @@ class GateMetrics(Protocol):
   <div class="bars">
     <span>単体</span>
     <span class="track"><span class="fill" style="width:100%"></span></span>
-    <span class="v">26</span>
+    <span class="v">28</span>
     <span>統合</span>
-    <span class="track"><span class="fill" style="width:53.8%"></span></span>
+    <span class="track"><span class="fill" style="width:50%"></span></span>
     <span class="v">14</span>
     <span>E2E</span>
-    <span class="track"><span class="fill" style="width:3.8%"></span></span>
+    <span class="track"><span class="fill" style="width:3.6%"></span></span>
     <span class="v">1</span>
   </div>
 
@@ -794,7 +808,8 @@ class GateMetrics(Protocol):
     <li>偽 <code>GateMetrics</code> が <code>0.85</code> / <code>0.95</code> を返す構成で <code>below_provisional_floor</code> が切り替わる — 実データ・実重み・指標実装のいずれにも依存しない決定的テストとして置く。</li>
     <li>k 近傍は該当あり・Mahalanobis は鍵なしの構成で、<code>domain_scope</code> が要求値のまま <code>domain_fallback_applied</code> が true になる — 2 方式の引き当てが非対称でもエラーにならず、記録の 2 フィールドが「要求」と「落ち先」を別々に表すことを固定。</li>
     <li><code>VISA_CATEGORIES</code> が anomalib の <code>CATEGORIES</code> と一致する（<code>pytest.importorskip</code> 付き） — 写した定数が上流の実測値からずれたときに落ちる回帰点を 1 箇所に集める。</li>
-    <li><code>resolve_prepared_visa_root</code> が 1cls 配置で <code>data_root/VisA_pytorch/1cls</code> を返す — guard が準備済みと認めた配置と抽出へ渡す root が食い違わないことを固定。</li>
+    <li><code>resolve_prepared_visa_root</code> が 1cls 配置で <code>data_root/VisA_pytorch/1cls</code> を返す — guard が認めた配置と抽出へ渡す root が食い違わないことを固定。複数配置が同時に存在するケースも置き、first-match 順が実装者判断に委ねられていないことを固定。</li>
+    <li>#3（分割未適用）で書き込み不可なら <code>DatasetLocationNotWritableError</code>、#1 / #2 では書き込み不可でも成功する — 複製が走る状態とそうでない状態の区別を固定。</li>
     <li>各プリセットで実重みの <code>patch_stride</code> が <code>tile_size</code> を割り切り、抽出エンジンが構築できる（重み未取得なら skip） — <code>dinov2</code> の patch 14 と 518 の組み合わせが実際に通ることの確認。</li>
     <li>公開面が 12 シンボルと一致し、スコア関数群を公開しない — <code>visa_gate</code> が中間層モジュールを直接 import しない前提を固定。</li>
   </ul>

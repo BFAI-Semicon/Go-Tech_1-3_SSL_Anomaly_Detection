@@ -338,6 +338,15 @@ Requirement 10.1 を満たせないため却下。
   2. 1cls 配置を対象外にし、`visa_pytorch` 配置だけを準備済みとする。
   3. guard が解決した root を返し、`extraction_assembly` はそれを受け取るだけにする。
 - **Selected Approach**: 案 3。`resolve_prepared_visa_root()` が検証と解決を 1 か所で行う。
+  判定は 4 ケースの **first-match** とし、順序は
+  (1) `visa_pytorch/{category}`、(2) `VisA_pytorch/1cls/{category}`、(3) `{category}`、
+  (4) 未取得 とする。「いずれかに一致」だと複数配置が同時に存在したときに返す root が
+  実装者判断になるため、順序付きで定義する。#1 を先頭にするのは anomalib 自身の判定順
+  （`visa.py:180-191` が `visa_pytorch/{category}` → `{category}` の順に見る）に合わせるため。
+  #2 を #3 より先にするのは、#3 だけが複製と書き込みを伴うためである。
+  書き込み可否の検証は #3 と #4 に対して行う。`apply_cls1_split()` が
+  `{root}/visa_pytorch/` へ 12 カテゴリ分を複製するので、#3 は「取得済みだが準備に書き込みが
+  必要」な状態にあたり Requirement 9.4 の対象になる（#1 / #2 は読み取り専用でも回せる）。
 - **Rationale**: 案 1 は「どの配置を準備済みと見るか」の規則が 2 か所に分かれ、片方だけ
   変えたときに guard は通るが抽出が落ちる状態になる。案 2 は前処理済みデータの流用という
   現実的な運用（約 16GB の再取得と全カテゴリ複製の回避）を捨てる。
@@ -407,9 +416,9 @@ Requirement 10.1 を満たせないため却下。
   現実的な規模に保つ。
 - **VisA の 1cls レイアウト不一致** — 配布元の前処理済みデータは
   `VisA_pytorch/1cls/{category}` だが anomalib は `{root}/visa_pytorch/{category}` を見る。
-  `dataset_guard` は 3 配置（`visa_pytorch/{category}`、`{category}`、
-  `VisA_pytorch/1cls/{category}`）を「準備済み」として認識し、どちらでもないときだけ
-  未準備と判定する。1cls 配置のときは `visa_image_source()` へ渡す root を
+  `dataset_guard` は 3 配置（`visa_pytorch/{category}`、`VisA_pytorch/1cls/{category}`、
+  `{category}`）をこの順に判定して「取得済み」と認識し、どれでもないときだけ未取得と
+  判定する。1cls 配置のときは `visa_image_source()` へ渡す root を
   `data_root/VisA_pytorch/1cls` に解決する（上記 Decision「guard は判定と同時に
   『渡す root』を返す」）。
 - **VisA は代理データ** — 半導体検査画像ではないため、ゲート通過は検出性能の妥当性を
