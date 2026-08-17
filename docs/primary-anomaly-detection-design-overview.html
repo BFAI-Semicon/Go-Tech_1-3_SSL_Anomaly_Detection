@@ -218,7 +218,7 @@
     <div class="stat"><b>46</b><span>受入基準</span></div>
     <div class="stat"><b>14</b><span>コンポーネント</span></div>
     <div class="stat"><b>25</b><span>新規モジュール</span></div>
-    <div class="stat"><b>35</b><span>計画テスト</span></div>
+    <div class="stat"><b>41</b><span>計画テスト</span></div>
   </div>
 </section>
 
@@ -490,6 +490,14 @@ src/visa_gate/
 <section id="domain">
   <h2>8. ドメイン別突き合わせ</h2>
   <p>既定（<code>domain_scoped = false</code>）ではドメインタグを一切参照せず、登録済み正常集合全体を単一プールとして扱う。true にしたときも行うのは「突き合わせ先の分布の選択」だけで、<strong>ドメイン不一致を候補除外の理由には使わない</strong>（フィルタではない）。</p>
+  <p>鍵の解決は <code>detect()</code> が <code>_resolve_domain_scope()</code> で 1 回だけ行い、同じ値を 2 方式へ渡す。<code>domain_scoped</code> が false なら <code>None</code>、true なら <code>features.domain</code> をそのまま返し、軸の欠けを補完も除去もしない。方式ごとに別の解決を行う経路は作らない。</p>
+
+  <div class="accent-box">
+    <h3>2 方式の引き当て範囲は非対称。これを許容する</h3>
+    <p style="margin:0 0 8px">k 近傍側はストアの <code>DomainCriteria</code> に写して引くが、ストアは空集合の軸を「無指定（何にでも一致）」として扱う。一方 Mahalanobis 側は <code>by_domain</code> の<strong>辞書キー完全一致</strong>。同じ鍵でも k 近傍の候補集合のほうが広くなり得る。</p>
+    <p style="margin:0 0 8px">較正側に軸ごとの緩和を実装しないのは、鍵ごとに独立した平均・共分散を持つ較正から「軸を緩めた集合の分布」を合成する手段が無いため。十分統計量を足せるのは同じ母集団の追加分だけで、異なる母集団の合算は <code>fit(A).extend(B) == fit(concat(A, B))</code> の意味を崩す。</p>
+    <p style="margin:0">両方式は該当有無を独立に判定し、<strong>片方だけ該当ありでもエラーにしない</strong>。それぞれが自分の経路でプールへ落ちる。</p>
+  </div>
   <table>
     <thead><tr><th>項目</th><th>k 近傍側</th><th>Mahalanobis 側</th></tr></thead>
     <tbody>
@@ -499,6 +507,16 @@ src/visa_gate/
     </tbody>
   </table>
   <p>件数不足の判定は<strong>フォールバック後</strong>の距離列に対して行う。そのため「ドメイン指定で 0 件」がバンク件数不足として誤検知されることはない。<code>detect()</code> は有効な方式の分だけ論理和を取り、結果に 1 つの <code>domain_fallback_applied</code> として集約する。</p>
+
+  <h3>記録は 2 フィールドに分ける</h3>
+  <table>
+    <thead><tr><th>フィールド</th><th>意味</th><th><code>domain_scoped = false</code></th></tr></thead>
+    <tbody>
+      <tr><td class="k">domain_scope</td><td>要求した鍵。フォールバックしても <code>None</code> へ書き換えない</td><td class="k">None</td></tr>
+      <tr><td class="k">domain_fallback_applied</td><td>いずれかの方式が実際にプールへ落ちたか</td><td class="k">false</td></tr>
+    </tbody>
+  </table>
+  <p>1 つのフィールドに「要求」と「結果」を持たせると、<code>None</code> が「ドメイン限定していない」と「限定したが落ちた」の両方を意味してしまう。分ければどちらの状態も曖昧さなく復元できます。なお、どちらの方式が落ちたかは記録しません（Req 6.4 が求めていないため）。</p>
 </section>
 
 <section id="gate">
@@ -506,7 +524,7 @@ src/visa_gate/
 
   <h3>実行順序</h3>
   <ol class="steps">
-    <li><strong>実行前検証</strong> — <code>data_root</code> の存在 → カテゴリの準備状態 → 未準備かつ未許可ならエラー → 準備するなら書き込み可否。<code>visa_image_source()</code> は内部で <code>prepare_data()</code> を呼び、未取得なら確認なしに約 16GB のダウンロードを始めるため、<strong>検証を後段に置けない</strong>。</li>
+    <li><strong>実行前検証と root の解決</strong> — <code>data_root</code> の存在 → カテゴリの準備状態 → 未準備かつ未許可ならエラー → 準備するなら書き込み可否。<code>visa_image_source()</code> は内部で <code>prepare_data()</code> を呼び、未取得なら確認なしに約 16GB のダウンロードを始めるため、<strong>検証を後段に置けない</strong>。<code>resolve_prepared_visa_root()</code> は判定と同時に「anomalib へ渡す root」を返し、guard の判定と抽出の入力が食い違わないようにする。<br>準備済みと認める配置は 3 つ： <code>data_root/visa_pytorch/{category}</code> と <code>data_root/{category}</code> は <code>data_root</code> を返し、配布元の前処理済みレイアウト <code>data_root/VisA_pytorch/1cls/{category}</code> は <code>data_root/VisA_pytorch/1cls</code> を返す（anomalib はこれを 2 つ目の経路として認識する）。</li>
     <li><strong>実行ディレクトリの採番</strong> — <code>{category}__{backbone}</code>、既存なら <code>-2</code>, <code>-3</code>, ... の未使用最小連番。時刻を使わないので決定的で、既存結果を上書きしない。</li>
     <li><strong>train/good の抽出</strong> — 画像ソースと抽出エンジンを組み立ててパッチ特徴を得る。</li>
     <li><strong>二重利用</strong> — 同じ抽出結果を (a) 既知正常としてストアへ一括登録、(b) Mahalanobis 較正の入力として渡す。どちらも<strong>そのまま渡す</strong>（L2 正規化は受け手が各々行う）。</li>
@@ -521,14 +539,27 @@ src/visa_gate/
     <thead><tr><th>引数</th><th>既定</th><th>制約</th></tr></thead>
     <tbody>
       <tr><td class="k">--data-root</td><td>なし（required）</td><td>既定値を持たせない（Req 8.2）</td></tr>
-      <tr><td class="k">--category</td><td class="k">pcb1</td><td>anomalib の <code>CATEGORIES</code> 12 種を <code>choices</code> に</td></tr>
-      <tr><td class="k">--backbone</td><td class="k">dinov3</td><td>プリセットキーのみ（dinov3 / dinov2 / dino / wide_resnet50_2）</td></tr>
+      <tr><td class="k">--category</td><td class="k">pcb1</td><td>自前定数 <code>VISA_CATEGORIES</code> の 12 種を <code>choices</code> に（anomalib は import しない）</td></tr>
+      <tr><td class="k">--backbone</td><td class="k">dinov3</td><td><code>GATE_BACKBONE_PRESETS</code> のキーのみ（dinov3 / dinov2 / dino / wide_resnet50_2）</td></tr>
       <tr><td class="k">--output-dir</td><td>—</td><td>—</td></tr>
       <tr><td class="k">--download</td><td class="k">false</td><td><code>store_true</code>。既定で取得しない（Req 9.2）</td></tr>
     </tbody>
   </table>
-  <p><code>tiling</code> / <code>detection</code> / <code>coreset_rate</code> / <code>merge_distance_threshold</code> は CLI 引数にしない。固定値の発生源は名前付きモジュール定数（<code>GATE_TILING_CONFIG</code> / <code>GATE_DETECTION_CONFIG</code>）か <code>VisaGateConfig</code> のフィールド既定値のどちらか 1 つに限る。</p>
-  <p>バックボーンを timm のモデル名の自由入力にしないのは、モデル名だけでは <code>feature_layer</code> と <code>feature_layout</code> が決まらないため。プリセットは <code>BackboneConfig</code> を完全形で持つ。</p>
+  <p><code>detection</code> / <code>coreset_rate</code> / <code>merge_distance_threshold</code> は CLI 引数にしない。固定値の発生源は名前付きモジュール定数 <code>GATE_DETECTION_CONFIG</code> か <code>VisaGateConfig</code> のフィールド既定値のどちらか 1 つに限る。</p>
+
+  <h3>プリセットはバックボーンとタイル設定の組</h3>
+  <p>timm のモデル名の自由入力を受け付けないのは、名前だけでは <code>feature_layer</code>・<code>feature_layout</code>・適用可能なタイルサイズが決まらないため。値は timm 1.0.28 で実測して確定しています。</p>
+  <table>
+    <thead><tr><th>キー</th><th>timm モデル名</th><th>feature_layer</th><th>layout</th><th>tile_size</th></tr></thead>
+    <tbody>
+      <tr><td class="k">dinov3</td><td class="k">vit_small_patch16_dinov3.lvd1689m</td><td class="k">blocks.11</td><td>TOKENS</td><td class="num">512</td></tr>
+      <tr><td class="k">dinov2</td><td class="k">vit_small_patch14_dinov2.lvd142m</td><td class="k">blocks.11</td><td>TOKENS</td><td class="num">518</td></tr>
+      <tr><td class="k">dino</td><td class="k">vit_small_patch16_224.dino</td><td class="k">blocks.11</td><td>TOKENS</td><td class="num">512</td></tr>
+      <tr><td class="k">wide_resnet50_2</td><td class="k">wide_resnet50_2.tv_in1k</td><td class="k">layer3</td><td>FEATURE_MAP</td><td class="num">512</td></tr>
+    </tbody>
+  </table>
+  <p>タイル設定を共通定数ではなくプリセットに持たせるのは、<code>FeatureExtractionEngine</code> が <code>tile_size % patch_stride == 0</code> を構築時に要求する一方、DINOv2 の timm 実装だけ patch 14 で <code>512 % 14 != 0</code> になるため。共通の 512 だと <code>--backbone dinov2</code> が必ず <code>ValueError</code> で落ち、逆に全体を 518 に寄せると patch 16 系が落ちます。<code>518 = 14 × 37</code>、<code>wide_resnet50_2</code> の <code>layer3</code> は reduction 16 です。</p>
+  <p>その結果 <code>dinov2</code> だけタイルサイズが揃いませんが、パッチストライドが 14 と 16 で異なる時点でパッチグリッドは揃わず、ゲート文書も「バンクサイズはパッチ数でも揃える」として差の存在を前提にしています。実値は <code>run_conditions.json</code> に残ります。</p>
   <p>ゲート既定の <code>GATE_DETECTION_CONFIG</code> は k 近傍と Mahalanobis を等重み <code>1.0</code> で<strong>両方</strong>有効にする。ゲートの目的は 2 方式と融合経路の配線確認であり、片方だけでは検証できない経路が残るため。</p>
 
   <h3>成果物レイアウト</h3>
@@ -544,6 +575,24 @@ src/visa_gate/
 
 <section id="api">
   <h2>10. 公開 API</h2>
+
+  <h3>公開する面と公開しない面</h3>
+  <p>規則は既存 3 パッケージと同じで、<strong>engine をルートに出し、公開シグネチャに現れる型はすべて公開する</strong>。</p>
+  <table>
+    <thead><tr><th>区分</th><th>シンボル</th></tr></thead>
+    <tbody>
+      <tr><td>engine</td><td class="k">PrimaryAnomalyDetector</td></tr>
+      <tr><td>設定</td><td class="k">DetectionConfig, ScoreMethod</td></tr>
+      <tr><td>結果</td><td class="k">PrimaryDetection, RoiCandidate, ScoringProvenance</td></tr>
+      <tr><td>較正</td><td class="k">MahalanobisCalibration, MahalanobisCalibrationSet</td></tr>
+      <tr><td>port と入口</td><td class="k">NormalNeighborSearch, store_normal_neighbor_search</td></tr>
+      <tr><td>例外</td><td class="k">PrimaryDetectionError, NormalBankTooSmallError, NormalFeatureCountInsufficientError, NormalReferenceIdentityMismatchError</td></tr>
+      <tr><td>公開しない</td><td class="k">knn_scores, fuse_scores, compose_heatmap, extract_roi_candidates, l2_normalize_rows</td></tr>
+    </tbody>
+  </table>
+  <p>較正型を公開するのは <code>PrimaryAnomalyDetector.__init__</code> の引数型であり、かつ較正の生成（<code>fit</code>）を行うのが合成ルートだから。出さないと <code>visa_gate</code> が <code>primary_anomaly_detection.scoring.mahalanobis</code> を直接 import することになり、中間層のモジュールがパッケージ間契約になってしまいます。</p>
+  <p>逆にスコア関数群を公開しないのは、いずれも <code>detect()</code> が定めた順序（同一性照合 → 正規化 → スコア → 融合 → 合成 → ROI）の内側の手順であり、個別に呼べるようにすると検査順を迂回した経路ができるためです。</p>
+  <p><code>visa_gate</code> 側は <code>run_visa_gate</code>・<code>VisaGateConfig</code>・<code>VISA_CATEGORIES</code>・<code>GATE_BACKBONE_PRESETS</code>・<code>GateRunSummary</code>・<code>GateRunConditions</code>・<code>GateMetricValues</code>・<code>GateMetrics</code>・<code>VisaGateError</code> とその派生を公開します。</p>
 
   <h3>設定と結果型</h3>
   <pre>class ScoreMethod(StrEnum):
@@ -574,8 +623,8 @@ class ScoringProvenance:
     method_weights: tuple[tuple[ScoreMethod, float], ...]
     neighbor_count: int | None            # KNN 有効時のみ非 None
     normal_feature_count: int | None      # Mahalanobis 有効時のみ非 None
-    domain_scope: DomainTags | None
-    domain_fallback_applied: bool
+    domain_scope: DomainTags | None       # 要求した鍵。フォールバックしても書き換えない
+    domain_fallback_applied: bool         # いずれかの方式がプールへ落ちたか
     identity: ExtractorIdentity
 
 
@@ -685,7 +734,7 @@ class GateMetrics(Protocol):
       <tr><td class="num">3</td><td>融合と運用点</td><td class="k">scoring/fusion.py, model/config.py</td><td>次元非依存の固定写像。空の重み集合を構築時に拒否。絶対値しきい値を持たない</td></tr>
       <tr><td class="num">4</td><td>ヒートマップ合成</td><td class="k">localization/heatmap.py</td><td><code>positions</code> から H/W 復元。重なりは算術平均で順序非依存</td></tr>
       <tr><td class="num">5</td><td>ROI 候補</td><td class="k">localization/roi.py</td><td>分位点超過の連結成分。整列後に 1 から採番。該当なしは空タプル</td></tr>
-      <tr><td class="num">6</td><td>ドメイン別突き合わせ</td><td class="k">engine.py, boundary/, scoring/</td><td>既定はプール。除外理由に使わない。フォールバックを戻り値で伝達</td></tr>
+      <tr><td class="num">6</td><td>ドメイン別突き合わせ</td><td class="k">engine.py, boundary/, scoring/</td><td>鍵の解決は engine に 1 つ。既定はプール。除外理由に使わない。フォールバックを戻り値で伝達</td></tr>
       <tr><td class="num">7</td><td>ゲート通し実行</td><td class="k">visa_gate/gate.py</td><td>登録 → 保存 → 復元。AUROC &lt; 0.9 で警告フラグ</td></tr>
       <tr><td class="num">8</td><td>実行条件と成果物</td><td class="k">visa_gate/cli.py, boundary/run_artifacts.py</td><td>引数 5 つ。条件別ディレクトリ採番で上書きしない</td></tr>
       <tr><td class="num">9</td><td>安全性と同一性</td><td class="k">boundary/dataset_guard.py, engine.py</td><td>データセットに触れる前に検証。<code>detect()</code> 冒頭で同一性照合</td></tr>
@@ -725,12 +774,12 @@ class GateMetrics(Protocol):
   <div class="bars">
     <span>単体</span>
     <span class="track"><span class="fill" style="width:100%"></span></span>
-    <span class="v">22</span>
+    <span class="v">26</span>
     <span>統合</span>
-    <span class="track"><span class="fill" style="width:54.5%"></span></span>
-    <span class="v">12</span>
+    <span class="track"><span class="fill" style="width:53.8%"></span></span>
+    <span class="v">14</span>
     <span>E2E</span>
-    <span class="track"><span class="fill" style="width:4.5%"></span></span>
+    <span class="track"><span class="fill" style="width:3.8%"></span></span>
     <span class="v">1</span>
   </div>
 
@@ -743,10 +792,15 @@ class GateMetrics(Protocol):
     <li>同一性不一致とノルム 0 の行を同時に持つ入力が <code>NormalReferenceIdentityMismatchError</code> になる — 検査順を固定する。</li>
     <li><code>compose_heatmap</code> がパッチ入力順を入れ替えても同一結果 — 重なり配置には <code>overlap = 0</code> かつ画像サイズが <code>tile_size</code> の倍数でない端寄せ配置を含める。</li>
     <li>偽 <code>GateMetrics</code> が <code>0.85</code> / <code>0.95</code> を返す構成で <code>below_provisional_floor</code> が切り替わる — 実データ・実重み・指標実装のいずれにも依存しない決定的テストとして置く。</li>
+    <li>k 近傍は該当あり・Mahalanobis は鍵なしの構成で、<code>domain_scope</code> が要求値のまま <code>domain_fallback_applied</code> が true になる — 2 方式の引き当てが非対称でもエラーにならず、記録の 2 フィールドが「要求」と「落ち先」を別々に表すことを固定。</li>
+    <li><code>VISA_CATEGORIES</code> が anomalib の <code>CATEGORIES</code> と一致する（<code>pytest.importorskip</code> 付き） — 写した定数が上流の実測値からずれたときに落ちる回帰点を 1 箇所に集める。</li>
+    <li><code>resolve_prepared_visa_root</code> が 1cls 配置で <code>data_root/VisA_pytorch/1cls</code> を返す — guard が準備済みと認めた配置と抽出へ渡す root が食い違わないことを固定。</li>
+    <li>各プリセットで実重みの <code>patch_stride</code> が <code>tile_size</code> を割り切り、抽出エンジンが構築できる（重み未取得なら skip） — <code>dinov2</code> の patch 14 と 518 の組み合わせが実際に通ることの確認。</li>
+    <li>公開面が 12 シンボルと一致し、スコア関数群を公開しない — <code>visa_gate</code> が中間層モジュールを直接 import しない前提を固定。</li>
   </ul>
 
   <h3>E2E は 3 条件が揃うときだけ実行</h3>
-  <p>VisA データが取得済み（<code>ensure_visa_dataset_ready</code> がエラーを出さない）、バックボーン重みが取得可能（<code>BackboneUnavailableError</code> → skip の踏襲）、<code>evaluation_framework</code> が import 可能（<code>pytest.importorskip</code>）。欠けていれば <code>pytest.skip</code> する。実行時は暫定下限の判定を実測値に依存させず、AUROC は成果物として残すだけにする。</p>
+  <p>VisA データが取得済み（<code>resolve_prepared_visa_root</code> がエラーを出さない）、バックボーン重みが取得可能（<code>BackboneUnavailableError</code> → skip の踏襲）、<code>evaluation_framework</code> が import 可能（<code>pytest.importorskip</code>）。欠けていれば <code>pytest.skip</code> する。実行時は暫定下限の判定を実測値に依存させず、AUROC は成果物として残すだけにする。</p>
 </section>
 
 <section id="perf">
@@ -780,6 +834,8 @@ class GateMetrics(Protocol):
       <tr><td>ストアが内部 L2 正規化をやめる、または抽出器が L2 正規化して返すようになる</td><td>較正空間・スコア空間・近傍探索空間を揃える前提</td></tr>
       <tr><td><code>search_normal</code> のシグネチャ、または対象ドメイン不在時に空タプルを返す挙動</td><td>ドメインフォールバック判定</td></tr>
       <tr><td><code>ExtractorIdentity</code> のフィールド構成</td><td>同一性照合と実行条件記録</td></tr>
+      <tr><td><code>tile_size % patch_stride == 0</code> 制約、またはプリセットの timm モデルの <code>patch_size</code> / <code>reduction</code></td><td>プリセットのタイルサイズが組めなくなる</td></tr>
+      <tr><td><code>DomainCriteria</code> の一致規則（空集合の軸を無指定として扱う）</td><td>2 方式のドメイン引き当ての非対称を許容した前提</td></tr>
       <tr><td><code>GateMetrics</code> port のシグネチャ</td><td><code>evaluation-framework</code> 側の前倒し実装との整合</td></tr>
       <tr><td><code>PrimaryDetection</code> / <code>RoiCandidate</code></td><td>下流 3 spec（LLM 構造化・補正レイヤ・評価基盤）へ波及</td></tr>
     </tbody>

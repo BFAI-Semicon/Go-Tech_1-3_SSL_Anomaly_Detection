@@ -86,8 +86,14 @@
   - `apply_cls1_split()` は `root/split_csv/1cls.csv` を読んで `root/visa_pytorch/` へ
     画像を複製する。読み取り専用ストレージでは失敗する（同 2）。
   - `CATEGORIES` は 12 要素のタプルで実測確認済み。
+  - anomalib の `Visa` が準備済みと見なすのは `{root}/visa_pytorch/{category}` と
+    `{root}/{category}` の 2 つだけで、配布元が作る `VisA_pytorch/1cls/{category}` は
+    どちらにも当たらない。ただし `root` に `.../VisA_pytorch/1cls` を渡せば
+    2 つ目の経路で認識される。
 - **Implications**: 検証は `visa_image_source()` の**呼び出し前**に置く。準備済みの場合は
   書き込み可否を要求しない（読み取り専用の準備済みデータで回せるようにするため）。
+  1cls 配置を準備済みと認めるなら、guard は判定だけでなく
+  「`visa_image_source()` へ渡す root」も返す必要がある（下記 Decision 参照）。
 
 ### 指標の前倒し実装と依存方向
 
@@ -261,19 +267,113 @@ Requirement 10.1 を満たせないため却下。
 - **Follow-up**: 端寄せで重なる配置（`overlap = 0` かつ非倍数サイズ）で ROI の再現性を確認し、
   重なり幅に対する代表スコアの薄まり量を測る。
 
+### Decision: ドメイン鍵は engine が 1 回解決し、2 方式の非対称を許容する
+
+- **Context**: Requirement 6.2 は「ドメインタグで分布を選択する」と要求するが、k 近傍は
+  ストアの `DomainCriteria`、Mahalanobis は `Mapping[DomainTags, ...]` の鍵という別の語彙で
+  引き当てる。両者の対応が未定義だと、同じ `DomainTags` でも該当有無が食い違う。
+- **Sources Consulted**: `patch_feature_store/model/criteria.py`（`DomainCriteria` の軸と
+  空集合の意味）、`patch_feature_store/engine.py` の `_normal_search_selection`、
+  `design.md` の `MahalanobisCalibrationSet.select`。
+- **Findings**:
+  - `DomainCriteria` は軸ごとの集合で、空集合の軸は「無指定（何にでも一致）」。したがって
+    `DomainTags` の `None` 軸を空集合に写すと、k 近傍の候補集合は鍵より広くなる。
+  - 較正側は鍵ごとに独立した平均・共分散を持つ。軸を緩めた集合に対応する分布を
+    既存の較正から合成する手段は無い（十分統計量を足せるのは同じ母集団の追加分だけ）。
+- **Alternatives Considered**:
+  1. 較正側にも軸ごとの緩和を実装し、部分一致した鍵の統計量を合算して分布を作る。
+  2. k 近傍側の変換を完全一致に狭め、`None` 軸を「値が `None` であること」として扱う。
+  3. 解決は engine の 1 関数に集約し、鍵の意味を「`DomainTags` 値そのもの」と定義した上で、
+     引き当て範囲の非対称は許容する。
+- **Selected Approach**: 案 3。`_resolve_domain_scope` が鍵を 1 回決め、同じ値を両方式へ渡す。
+  各方式は独立にフォールバックを判定し、片方だけ該当ありでもエラーにしない。
+- **Rationale**: 案 1 は十分統計量の合算対象を「異なる母集団の合成」に広げることになり、
+  Requirement 2.4 が保証する `fit(A).extend(B) == fit(concat(A, B))` の意味を崩す。
+  案 2 はストアの検索語彙を本 spec の都合で再定義することになり、境界外の挙動に依存する。
+- **Trade-offs**: 同じ鍵で k 近傍は該当あり・Mahalanobis は該当なしという状態が起こり得る。
+  この場合 Mahalanobis だけがプール較正に落ち、`domain_fallback_applied` が true になる。
+  どちらの方式が落ちたかは記録に残らない。方式別のフォールバック記録は
+  Requirement 6.4 が求めていないため持たせない。
+- **Follow-up**: 方式ごとの落ち先を区別する必要が出たら、`domain_fallback_applied` を
+  方式別のマップに広げる（`ScoringProvenance` の契約変更として扱う）。
+
+### Decision: `domain_scope` は要求した鍵を記録する
+
+- **Context**: Requirement 6.5 は「使用したドメイン範囲を記録する」と書くが、
+  フォールバックが起きたときに「要求した鍵」と「実際に使った範囲（プール）」のどちらを
+  指すのかが決まっていない。
+- **Alternatives Considered**:
+  1. フォールバック時は `domain_scope` を `None` に書き換え、実際に使った範囲を表す。
+  2. `domain_scope` は要求した鍵のままにし、落ち先は `domain_fallback_applied` で表す。
+- **Selected Approach**: 案 2。`domain_scoped` が false のときだけ `None` になる。
+- **Rationale**: 案 1 は 1 つのフィールドに「要求」と「結果」の 2 つの意味を持たせ、
+  `None` が「ドメイン限定していない」と「限定したが落ちた」の両方を意味してしまう。
+  2 フィールドに分ければどちらの状態も曖昧さなく復元できる。
+- **Trade-offs**: 読み手は 2 フィールドを併せて解釈する必要がある。
+- **Follow-up**: なし。
+
+### Decision: カテゴリ一覧は `visa_gate.model` の定数として写す
+
+- **Context**: Requirement 8.3 のカテゴリ制限を `anomalib...CATEGORIES` で行うと、
+  `model` 層と `cli` 層が anomalib を import することになる。
+- **Sources Consulted**: `.kiro/steering/structure.md:68-69`（torch / timm / anomalib / faiss の
+  import は `boundary` 限定、`model` は numpy で書く）、`docs/visa-validation-gate.md:97`。
+- **Alternatives Considered**:
+  1. `model/config.py` から `anomalib...CATEGORIES` を import する。
+  2. 12 件を `VISA_CATEGORIES` として写し、上流との一致を `boundary` のテストで照合する。
+- **Selected Approach**: 案 2。
+- **Rationale**: 案 1 は steering の層制約に直接反する。ゲート文書が `CATEGORIES` を
+  `choices` にすると書いているのは値の出所の指定であって、import 位置の指定ではない。
+- **Trade-offs**: anomalib 側の一覧が変わると定数が古くなる。これを検知する回帰テストを
+  1 本置いて代償する（`pytest.importorskip("anomalib")` 付き）。
+- **Follow-up**: なし。
+
+### Decision: guard は判定と同時に「渡す root」を返す
+
+- **Context**: `research.md` の既知リスクは 1cls 配置も準備済みとして認識すると決めたが、
+  anomalib が見るのは `{root}/visa_pytorch/{category}` と `{root}/{category}` の 2 つだけで、
+  guard が準備済みと判定しても抽出側が同じデータに到達できない。
+- **Alternatives Considered**:
+  1. guard は `None` を返し、root の解決を `extraction_assembly` にもう一度書く。
+  2. 1cls 配置を対象外にし、`visa_pytorch` 配置だけを準備済みとする。
+  3. guard が解決した root を返し、`extraction_assembly` はそれを受け取るだけにする。
+- **Selected Approach**: 案 3。`resolve_prepared_visa_root()` が検証と解決を 1 か所で行う。
+- **Rationale**: 案 1 は「どの配置を準備済みと見るか」の規則が 2 か所に分かれ、片方だけ
+  変えたときに guard は通るが抽出が落ちる状態になる。案 2 は前処理済みデータの流用という
+  現実的な運用（約 16GB の再取得と全カテゴリ複製の回避）を捨てる。
+- **Trade-offs**: 関数名と戻り値が「検証」から「検証＋解決」に広がる。名前を
+  `ensure_visa_dataset_ready` から `resolve_prepared_visa_root` に変えて意味を合わせる。
+- **Follow-up**: MVTec など他データセットを足すときは、データセット別の解決規則を
+  boundary 内で分ける（配置規則はデータセット固有の知識）。
+
 ### Decision: `--backbone` はプリセットキーに限定する
 
 - **Context**: Requirement 8.1 がバックボーンを引数で受け取ることを要求している。
 - **Alternatives Considered**:
   1. timm のモデル名を自由入力させ、特徴層とレイアウトを名前から推定する。
   2. `BackboneConfig` を完全形で持つプリセット表を用意し、キーを選ばせる。
-- **Selected Approach**: 案 2。初期プリセットは `docs/visa-validation-gate.md` が挙げる
-  比較対象 4 種（DINOv3・DINOv2・DINO・`wide_resnet50_2`）。
+- **Selected Approach**: 案 2。初期プリセットは `docs/visa-validation-gate.md:58` が挙げる
+  比較対象 4 種（DINOv3・DINOv2・DINO・`wide_resnet50_2`）で、値は timm 1.0.28 で実測して
+  確定した。`vit_small_patch16_dinov3.lvd1689m` / `vit_small_patch14_dinov2.lvd142m` /
+  `vit_small_patch16_224.dino` はいずれも depth 12・`embed_dim` 384 で、最終ブロックを指す
+  `feature_layer` は `blocks.11`。`wide_resnet50_2.tv_in1k` は `layer3` の `reduction` が 16。
+  あわせて**タイル設定をプリセットに含める**。
 - **Rationale**: `BackboneConfig` は `feature_layer` と `feature_layout` を必須とし、
   `blocks.<int>` かどうかの検証まで行う。モデル名からこれらを推定する規則は存在せず、
-  推定を書けば新しい暗黙契約を作ることになる。
-- **Trade-offs**: プリセットに無いバックボーンを試すには表への追記が要る。
+  推定を書けば新しい暗黙契約を作ることになる。タイル設定を含めるのは、
+  `FeatureExtractionEngine` が `tile_size % patch_stride == 0` を構築時に要求する一方
+  （`ssl-vit-feature-extraction/design.md:427`）、DINOv2 の timm 実装だけ patch 14
+  （実測: `patch_embed.patch_size == (14, 14)`）で `512 % 14 != 0` になるためである。
+  全プリセット共通の `tile_size = 512` を置くと、`--backbone dinov2` が構築時 `ValueError` で
+  必ず落ちる。逆に全体を 518 に寄せると patch 16 系が落ちる。
+- **Trade-offs**: プリセットに無いバックボーンを試すには表への追記が要る。`dinov2` だけ
+  `tile_size = 518` になり、`docs/visa-validation-gate.md:62` の「タイル化・パッチ化のサイズを
+  揃える」を厳密には満たせない。もっともパッチストライドが 14 と 16 で異なる時点で
+  パッチグリッドは揃わず、同文書も「バンクサイズはパッチ数でも揃える」として差の存在を
+  前提にしている。実値は `run_conditions.json` に残るため比較時に追える。
 - **Follow-up**: 比較実験でプリセットが不足したら表に追記する（設計変更を伴わない）。
+  ViT-S/14 と ViT-S/16 のパッチ数差が比較結果に効くようなら、パッチ数を揃える
+  部分サンプリングを `evaluation-framework` 側の実験プロトコルとして足す。
 
 ### Decision: 実行ディレクトリは条件名 + 連番で採番する
 
@@ -307,8 +407,11 @@ Requirement 10.1 を満たせないため却下。
   現実的な規模に保つ。
 - **VisA の 1cls レイアウト不一致** — 配布元の前処理済みデータは
   `VisA_pytorch/1cls/{category}` だが anomalib は `{root}/visa_pytorch/{category}` を見る。
-  `dataset_guard` は両方の配置を「準備済み」として認識し、どちらでもないときだけ
-  未準備と判定する。
+  `dataset_guard` は 3 配置（`visa_pytorch/{category}`、`{category}`、
+  `VisA_pytorch/1cls/{category}`）を「準備済み」として認識し、どちらでもないときだけ
+  未準備と判定する。1cls 配置のときは `visa_image_source()` へ渡す root を
+  `data_root/VisA_pytorch/1cls` に解決する（上記 Decision「guard は判定と同時に
+  『渡す root』を返す」）。
 - **VisA は代理データ** — 半導体検査画像ではないため、ゲート通過は検出性能の妥当性を
   意味しない。暫定下限 0.9 は配線ミス検知の目安であってチューニング目標ではないことを
   CLI の警告文にも明記する。

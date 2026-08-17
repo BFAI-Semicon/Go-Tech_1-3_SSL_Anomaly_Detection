@@ -91,6 +91,11 @@
 - `PatchFeatureStore.search_normal` のシグネチャ、または対象ドメイン不在時に空タプルを返す
   挙動が変わる → ドメインフォールバック判定が壊れる。
 - `ExtractorIdentity` のフィールド構成が変わる → 同一性照合と実行条件記録が壊れる。
+- `FeatureExtractionEngine` の `tile_size % patch_stride == 0` 制約、または
+  `GATE_BACKBONE_PRESETS` に載せた timm モデルの `patch_size` / `reduction` が変わる
+  → プリセットのタイルサイズが組めなくなる。
+- `patch_feature_store` の `DomainCriteria` の一致規則（空集合の軸を無指定として扱う）が変わる
+  → k 近傍と Mahalanobis のドメイン引き当ての非対称を許容した前提が変わる。
 - `GateMetrics` port のシグネチャが変わる → `evaluation-framework` 側の前倒し実装と不整合になる。
 - `primary_anomaly_detection` の公開結果型（`PrimaryDetection` / `RoiCandidate`）が変わる
   → `llm-feedback-structuring` / `promptable-correction-layer` / `evaluation-framework` に波及。
@@ -212,7 +217,7 @@ graph TB
 ```text
 src/
 ├── primary_anomaly_detection/         # Req 1-6: スコア化・ヒートマップ・ROI
-│   ├── __init__.py                    # 公開 API（結果型・設定型・エラー・port 実装入口）
+│   ├── __init__.py                    # 公開 API（下記「公開する面」の一覧）
 │   ├── model/
 │   │   ├── types.py                   # ScoreMethod StrEnum
 │   │   ├── config.py                  # DetectionConfig（pydantic, extra=forbid）
@@ -230,9 +235,9 @@ src/
 │   │   └── store_neighbors.py         # PatchFeatureStore を NormalNeighborSearch へ適合
 │   └── engine.py                      # composition root（PrimaryAnomalyDetector）
 └── visa_gate/                         # Req 7-10: VisA 検証ゲート合成ルート
-    ├── __init__.py                    # 公開 API（run_visa_gate / VisaGateConfig / エラー）
+    ├── __init__.py                    # 公開 API（下記「公開する面」の一覧）
     ├── model/
-    │   ├── config.py                  # VisaGateConfig とバックボーンプリセット
+    │   ├── config.py                  # VisaGateConfig / VISA_CATEGORIES / GATE_BACKBONE_PRESETS
     │   ├── results.py                 # GateRunConditions / GateMetricValues / GateRunSummary
     │   ├── errors.py                  # データセット準備・書き込みのエラー型
     │   └── ports.py                   # GateMetrics Protocol
@@ -265,6 +270,37 @@ tests/
 
 同一中間層のモジュール同士は import しない（`scoring/*` 相互、`localization/*` 相互、
 `visa_gate/boundary/*` 相互）。配線は `engine.py` / `gate.py` が行う。
+
+### 公開する面
+
+`primary_anomaly_detection/__init__.py` が公開するのは次の 12 シンボルである。
+
+- engine: `PrimaryAnomalyDetector`
+- 設定: `DetectionConfig`、`ScoreMethod`
+- 結果: `PrimaryDetection`、`RoiCandidate`、`ScoringProvenance`
+- 較正: `MahalanobisCalibration`、`MahalanobisCalibrationSet`
+- port と実装入口: `NormalNeighborSearch`、`store_normal_neighbor_search`
+- 例外: `PrimaryDetectionError`、`NormalBankTooSmallError`、
+  `NormalFeatureCountInsufficientError`、`NormalReferenceIdentityMismatchError`
+
+`visa_gate/__init__.py` が公開するのは `run_visa_gate`、`VisaGateConfig`、`VISA_CATEGORIES`、
+`GATE_BACKBONE_PRESETS`、`GateRunSummary`、`GateRunConditions`、`GateMetricValues`、
+`GateMetrics`、`VisaGateError` とその派生（`DatasetRootMissingError` /
+`DatasetNotPreparedError` / `DatasetLocationNotWritableError`）である。
+
+公開の規則は既存 3 パッケージと同じで、**engine をルートに出し、公開シグネチャに現れる型は
+すべて公開する**。`MahalanobisCalibration` と `MahalanobisCalibrationSet` を公開するのは
+`PrimaryAnomalyDetector.__init__` の引数型であり、かつ較正の生成（`fit`）を行うのが
+合成ルートだからである（Req 2.1 の正常特徴供給元は呼び出し側）。これを出さないと
+`visa_gate` が `primary_anomaly_detection.scoring.mahalanobis` を直接 import することになり、
+中間層のモジュールがパッケージ間契約になってしまう。`GateMetrics` と `GateMetricValues` は
+`run_visa_gate()` の引数型と戻り値の構成要素なので同じ規則で公開する。
+
+`knn_scores` / `fuse_scores` / `compose_heatmap` / `extract_roi_candidates` /
+`l2_normalize_rows` は公開しない。いずれも `PrimaryAnomalyDetector.detect()` が定めた順序
+（同一性照合 → 正規化 → スコア → 融合 → 合成 → ROI）の内側の手順であり、外から個別に呼べる
+ようにすると検査順を迂回した経路ができる。`visa_gate/boundary/*` の各ファクトリも公開しない
+（合成ルートの内部配線であり、外部の呼び出し元が無い）。
 
 ### Modified Files
 
@@ -357,7 +393,7 @@ sequenceDiagram
 
     Cli->>Gate: VisaGateConfig
     Gate->>Guard: データルート・準備状態・書込可否を検証
-    Guard-->>Gate: 検証済み。不備なら即エラー
+    Guard-->>Gate: 解決済み root。不備なら即エラー
     Gate->>Art: 実行ディレクトリを採番
     Gate->>Ext: 画像ソースと抽出エンジンを構築
     Gate->>Ext: train good のパッチ特徴を抽出
@@ -405,10 +441,10 @@ sequenceDiagram
 | 5.4 | `localization/roi.py`, `model/config.py` | 代表スコア降順・`roi_max_count` で打ち切り |
 | 5.5 | `localization/roi.py` | 該当領域なしは空タプル（エラーにしない） |
 | 6.1 | `engine.py`, `model/config.py` | `domain_scoped` 既定 false でプール分布 |
-| 6.2 | `boundary/store_neighbors.py`, `scoring/mahalanobis.py` | ドメインタグで分布を選択 |
+| 6.2 | `engine.py`, `boundary/store_neighbors.py`, `scoring/mahalanobis.py` | 鍵を 1 回解決し両方式へ渡す |
 | 6.3 | `engine.py` | ドメイン不一致を候補除外の理由にしない |
 | 6.4 | `boundary/store_neighbors.py`, `scoring/*`, `engine.py` | 空結果／較正欠如でプール再探索し戻り値で伝達 |
-| 6.5 | `model/results.py` | `domain_scope` に使用したドメイン範囲を記録 |
+| 6.5 | `model/results.py`, `engine.py` | 要求鍵は `domain_scope`、落ち先は `domain_fallback_applied` |
 | 7.1 | `visa_gate/gate.py`, `boundary/store_assembly.py` | 既知正常一括登録 → 保存 → 復元 |
 | 7.2 | `visa_gate/gate.py` | test 分割の各画像でスコア・ヒートマップ・ROI |
 | 7.3 | `visa_gate/model/ports.py`, `boundary/metrics_adapter.py` | `GateMetrics.evaluate()` |
@@ -416,7 +452,7 @@ sequenceDiagram
 | 7.5 | `visa_gate/gate.py`, `cli.py` | AUROC < 0.9 で配線確認を促す警告 |
 | 8.1 | `visa_gate/cli.py` | data-root / category / backbone / output-dir 引数 |
 | 8.2 | `visa_gate/cli.py` | `--data-root` は `required=True`、既定値なし |
-| 8.3 | `visa_gate/cli.py`, `model/config.py` | 既定 `pcb1`、`CATEGORIES` を `choices` |
+| 8.3 | `visa_gate/cli.py`, `model/config.py` | 既定 `pcb1`、`VISA_CATEGORIES` を `choices` |
 | 8.4 | `boundary/run_artifacts.py` | 条件別ディレクトリ採番。既存を上書きしない |
 | 8.5 | `model/config.py`, `model/results.py`, `boundary/run_artifacts.py` | 条件値の発生源と保存 |
 | 9.1 | `boundary/dataset_guard.py`, `model/errors.py` | ルート不在で `DatasetRootMissingError` |
@@ -440,11 +476,11 @@ sequenceDiagram
 | RoiExtractor | localization | ROI 候補抽出 | 5.1-5.5 | scipy ndimage (P0) | Service |
 | StoreNeighborSearch | boundary | ストア適合 | 1.1, 6.2, 6.4, 9.5 | patch_feature_store (P0) | Service |
 | PrimaryAnomalyDetector | engine | 検出の合成 | 1-6, 9.5 | 上記全部 (P0) | Service |
-| DatasetGuard | gate boundary | 実行前検証 | 9.1-9.4 | pathlib (P0) | Service |
+| DatasetGuard | gate boundary | 実行前検証と root 解決 | 9.1-9.4 | pathlib (P0) | Service |
 | RunArtifacts | gate boundary | 成果物出力 | 7.4, 8.4, 8.5 | numpy, json (P0) | Batch |
 | GateMetrics | gate model | 指標取得 seam | 7.3 | evaluation_framework (P0) | Service |
 | VisaGate | gate | 通し実行 | 7.1-7.5, 10.1 | 上記全部 (P0) | Batch |
-| VisaGateCli | cli | 引数解釈 | 8.1-8.3, 9.2 | argparse, anomalib (P0) | Service |
+| VisaGateCli | cli | 引数解釈 | 8.1-8.3, 9.2 | argparse (P0) | Service |
 
 ### 一次異常検出
 
@@ -539,6 +575,13 @@ class NormalNeighborSearch(Protocol):
 
 - `DomainTags` を `DomainCriteria` へ変換する。`None` でない軸だけを 1 要素の
   `frozenset` として渡す。全軸 `None` の `DomainTags` はプール扱い（`domain=None`）にする。
+- この変換は `engine` が解決した鍵をストアの問い合わせ語彙へ写すだけで、軸ごとの緩和を意図した
+  ものではない。ただしストアは空集合の軸を「無指定（何にでも一致）」として扱うため
+  （`patch_feature_store/model/criteria.py`）、結果として k 近傍の候補集合は同じ鍵で引く
+  Mahalanobis 較正（`by_domain` の完全一致）より広くなり得る。**この非対称は許容する**。
+  k 近傍は正常集合の部分集合を絞るだけで済むが、Mahalanobis は鍵ごとに独立した平均・共分散を
+  必要とし、軸を緩めた集合の分布を合成する手段が無いためである。両方式は該当有無を独立に
+  判定し、片方だけ該当ありでもエラーにしない（それぞれが自分の経路でプールへフォールバックする）。
 - `NormalSearchQuery(embedding, k, identity, domain, bank_id)` を組み立てて呼ぶ。`identity` は
   `neighbor_distances()` の引数をそのまま渡す。ファクトリで固定すると入力特徴の同一性メタが
   ストアへ届かず、`accept_query` の照合が常に成立してしまうため（Req 9.5）。
@@ -643,6 +686,12 @@ def knn_scores(
 - `scores()` は入力を再正規化しない。呼び出し元は `PrimaryAnomalyDetector.detect()` だけで、
   そこで L2 正規化済みの埋め込みが渡る。較正入力（外部由来・未正規化）とスコア入力
   （`detect()` 由来・正規化済み）で扱いが違うため、両者を Preconditions に明記する。
+- `MahalanobisCalibrationSet.by_domain` の鍵は `DomainTags` の値であり、`select()` は
+  **完全一致でのみ**引き当てる。軸ごとの緩和や部分一致は行わない。鍵の生成は呼び出し側
+  （合成ルート）の責務で、ストアへ登録した `DomainTags` と同じ値を使う。`select(None)` と
+  該当鍵なしはどちらも `pooled` を返し、後者だけ 2 要素目が true になる（Req 6.4）。
+  鍵が引けなかったことをエラーにしないのは、ドメイン限定が任意機能であり、対応分布の不在は
+  ドメイン非依存へ落ちる正常な経路だからである（Req 6.4）。
 
 ##### Service Interface (MahalanobisCalibration)
 
@@ -832,9 +881,20 @@ def extract_roi_candidates(
 - `domain_scoped` が false のときはドメインタグを一切参照しない（Req 6.1）。
   true のときも、ドメイン不一致を候補除外の理由には使わない（Req 6.3）。
   行うのは「突き合わせ先の分布の選択」だけで、フィルタではない。
+- **ドメイン鍵の解決は `detect()` が 1 回だけ行い、同じ値を両方式へ渡す**。
+  `_resolve_domain_scope(config.domain_scoped, features.domain) -> DomainTags | None` が
+  `domain_scoped` が false なら `None`、true なら `features.domain` をそのまま返す。
+  軸の欠け（`None` の軸）を補完も除去もしない。方式ごとに別の解決を行う経路は作らない。
+  この 1 値を `knn_scores(domain=...)` と `MahalanobisCalibrationSet.select(domain=...)` の
+  両方に渡す（Req 6.2）。
 - フォールバック発生は自分で判定せず、各スコアラーの戻り値から受け取る。`knn_scores()` の
   2 要素目と `MahalanobisCalibrationSet.select()` の 2 要素目について、有効な方式の分だけ
   論理和を取り `ScoringProvenance.domain_fallback_applied` に載せる（Req 6.4）。
+- `ScoringProvenance.domain_scope` には**解決した鍵をそのまま**載せる。フォールバックが起きても
+  `None` へ書き換えない。「どの範囲を要求したか」は `domain_scope`、「実際にプールで算出したか」は
+  `domain_fallback_applied` が持つ 2 フィールドに分け、1 つのフィールドに 2 つの意味を持たせない
+  （Req 6.5）。`domain_scoped` が false のときは `domain_scope` は `None` で
+  `domain_fallback_applied` は false になる。
 
 ##### Service Interface (PrimaryAnomalyDetector)
 
@@ -854,8 +914,8 @@ class ScoringProvenance:
     method_weights: tuple[tuple[ScoreMethod, float], ...]
     neighbor_count: int | None
     normal_feature_count: int | None
-    domain_scope: DomainTags | None
-    domain_fallback_applied: bool
+    domain_scope: DomainTags | None       # 要求した鍵。フォールバックしても書き換えない
+    domain_fallback_applied: bool         # いずれかの方式がプールへ落ちたか
     identity: ExtractorIdentity
 
 
@@ -908,13 +968,28 @@ class PrimaryAnomalyDetector:
 ##### Responsibilities & Constraints (VisaGateConfig)
 
 - pydantic `extra="forbid"`。`data_root` に既定値を持たせない（Req 8.2）。
-- `category` の既定は `pcb1`。`anomalib.data.datasets.image.visa.CATEGORIES`
-  （実測値: candle, capsules, cashew, chewinggum, fryum, macaroni1, macaroni2,
-  pcb1, pcb2, pcb3, pcb4, pipe_fryum）以外を拒否する（Req 8.3）。
+- `category` の既定は `pcb1`。許容値は本パッケージが持つ定数 `VISA_CATEGORIES` の 12 件で、
+  `model` 層から anomalib を import しない（Req 8.3）。steering が anomalib の import を
+  `boundary` 限定とし、`model` は numpy で書くと定めているためである
+  （`.kiro/steering/structure.md:68-69`）。値の出所は
+  `anomalib.data.datasets.image.visa.CATEGORIES` の実測値（candle, capsules, cashew,
+  chewinggum, fryum, macaroni1, macaroni2, pcb1, pcb2, pcb3, pcb4, pipe_fryum）だが、
+  定数として写して持つ。写した値が anomalib 側と一致していることは `boundary` のテストで
+  `pytest.importorskip("anomalib")` を付けて照合し、将来のバージョンで実測値が変わったときに
+  落ちる回帰点を 1 つ置く。
 - `allow_download` の既定は false（Req 9.2）。
-- `backbone` はプリセットキー。プリセットは `BackboneConfig`（名前・特徴層・レイアウト）を
-  完全形で持つ。timm のモデル名だけでは特徴層とレイアウトが決まらないため、名前の自由入力は
-  受け付けない。プリセットは VisA 検証ゲート文書が挙げる比較対象 4 種を初期値とする。
+- `backbone` はプリセットキー。`GATE_BACKBONE_PRESETS` は `BackboneConfig` と `TilingConfig`
+  の組を**完全形**で持つ（下記の定義がその全量）。timm のモデル名だけでは特徴層・レイアウト・
+  適用可能なタイルサイズが決まらないため、名前の自由入力は受け付けない。プリセットは
+  VisA 検証ゲート文書が挙げる比較対象 4 種（`docs/visa-validation-gate.md:58`）とする。
+- **タイル設定はプリセットが持つ**。`FeatureExtractionEngine` は
+  `tiling.tile_size % identity.patch_stride == 0` を構築時に要求する
+  （`.kiro/specs/ssl-vit-feature-extraction/design.md:427`）。DINOv2 の timm 実装は
+  patch 14（実測: `vit_small_patch14_dinov2.lvd142m` の `patch_embed.patch_size` は
+  `(14, 14)`）で、`512 % 14 != 0` のため全プリセット共通の `tile_size = 512` では
+  構築が失敗する。タイルサイズをバックボーンごとに持たせ、`patch_stride` との整合を
+  プリセット定義の時点で閉じる。`VisaGateConfig` は `tiling` フィールドを持たない
+  （同じ事実の発生源を 2 つにしないため）。
 - `detection` の既定はモジュール定数 `GATE_DETECTION_CONFIG`。k 近傍と Mahalanobis を
   等重み `1.0` で両方有効にする。ゲートの目的は 2 方式と融合経路の配線確認であり、
   片方だけを有効にすると検証できない経路が残るため。この定数が Requirement 8.5 の記録項目
@@ -923,9 +998,53 @@ class PrimaryAnomalyDetector:
 ##### Service Interface (VisaGateConfig)
 
 ```python
-BACKBONE_PRESETS: Mapping[str, BackboneConfig]      # dinov3 / dinov2 / dino / wide_resnet50_2
+VISA_CATEGORIES: tuple[str, ...] = (
+    "candle", "capsules", "cashew", "chewinggum", "fryum", "macaroni1",
+    "macaroni2", "pcb1", "pcb2", "pcb3", "pcb4", "pipe_fryum",
+)
 
-GATE_TILING_CONFIG = TilingConfig(tile_size=512, overlap=0)
+
+@dataclass(frozen=True)
+class GateBackbonePreset:
+    backbone: BackboneConfig
+    tiling: TilingConfig
+
+
+GATE_BACKBONE_PRESETS: Mapping[str, GateBackbonePreset] = {
+    "dinov3": GateBackbonePreset(
+        backbone=BackboneConfig(
+            name="vit_small_patch16_dinov3.lvd1689m",
+            feature_layer="blocks.11",
+            feature_layout=FeatureLayout.TOKENS,
+        ),
+        tiling=TilingConfig(tile_size=512, overlap=0),      # 512 % 16 == 0
+    ),
+    "dinov2": GateBackbonePreset(
+        backbone=BackboneConfig(
+            name="vit_small_patch14_dinov2.lvd142m",
+            feature_layer="blocks.11",
+            feature_layout=FeatureLayout.TOKENS,
+        ),
+        tiling=TilingConfig(tile_size=518, overlap=0),      # 518 == 14 * 37
+    ),
+    "dino": GateBackbonePreset(
+        backbone=BackboneConfig(
+            name="vit_small_patch16_224.dino",
+            feature_layer="blocks.11",
+            feature_layout=FeatureLayout.TOKENS,
+        ),
+        tiling=TilingConfig(tile_size=512, overlap=0),
+    ),
+    "wide_resnet50_2": GateBackbonePreset(
+        backbone=BackboneConfig(
+            name="wide_resnet50_2.tv_in1k",
+            feature_layer="layer3",
+            feature_layout=FeatureLayout.FEATURE_MAP,
+        ),
+        tiling=TilingConfig(tile_size=512, overlap=0),      # layer3 の reduction は 16
+    ),
+}
+
 GATE_DETECTION_CONFIG = DetectionConfig(
     method_weights={ScoreMethod.KNN: 1.0, ScoreMethod.MAHALANOBIS: 1.0},
 )
@@ -939,25 +1058,36 @@ class VisaGateConfig(BaseModel):
     category: str = "pcb1"
     backbone: str = "dinov3"
     allow_download: bool = False
-    tiling: TilingConfig = GATE_TILING_CONFIG
     detection: DetectionConfig = GATE_DETECTION_CONFIG
     coreset_rate: float = 0.1
     merge_distance_threshold: float = 0.0
 ```
 
-`tiling` / `detection` / `coreset_rate` / `merge_distance_threshold` は CLI 引数にしない。
+プリセットの値は timm 1.0.28 で実測して決めた。4 種すべて ViT-S 相当・埋め込み 384 次元で揃え、
+ViT 系は最終ブロック（depth 12 なので `blocks.11`）、CNN は `layer3`（reduction 16、
+PatchCore 系の慣行）とする。`weights_revision` はいずれも指定せず、解決は抽出器側に任せる。
+
+`detection` / `coreset_rate` / `merge_distance_threshold` は CLI 引数にしない。
 Requirement 8.1 が挙げる引数集合を最小に保つためである。固定の形は 2 通りで、
-`tiling` / `detection` は名前付きモジュール定数（`GATE_TILING_CONFIG` /
-`GATE_DETECTION_CONFIG`）を既定値に置き、`coreset_rate` / `merge_distance_threshold` は
-`VisaGateConfig` のフィールド既定値そのものが唯一の発生源になる。
+`detection` は名前付きモジュール定数 `GATE_DETECTION_CONFIG` を既定値に置き、
+`coreset_rate` / `merge_distance_threshold` は `VisaGateConfig` のフィールド既定値そのものが
+唯一の発生源になる。タイル設定は `GATE_BACKBONE_PRESETS[backbone].tiling` が唯一の発生源で、
+`GateRunConditions.tile_size` / `tile_overlap` はここから写す（Req 8.5）。
 `merge_distance_threshold` は `StoreConfig` の必須フィールドなのでゲート側が値を決める必要が
 あるが、Requirement 8.5 の記録項目には含まれない。
+
+`dinov2` だけタイルサイズが 518 になるため、バックボーン間比較では
+`docs/visa-validation-gate.md:62` の「タイル化・パッチ化のサイズを揃える」を厳密には満たせない。
+パッチストライドが異なる時点でパッチグリッドは揃わず、同文書も「バンクサイズはパッチ数でも
+揃える」として差の存在を前提にしている。タイルサイズを 518 に寄せて揃える案は採らない
+（patch 16 系で `518 % 16 != 0` になり全プリセットが組めなくなる）。実際の値は
+`run_conditions.json` に残るため、比較時に差を追える。
 
 #### DatasetGuard
 
 | Field | Detail |
 | --- | --- |
-| Intent | データセットに触れる前に安全性を検証する |
+| Intent | データセットに触れる前に安全性を検証し、渡す root を解決する |
 | Requirements | 9.1, 9.3, 9.4 |
 
 ##### Responsibilities & Constraints (DatasetGuard)
@@ -965,20 +1095,35 @@ Requirement 8.1 が挙げる引数集合を最小に保つためである。固�
 - **`visa_image_source()` を呼ぶ前に実行する**。同関数は内部で `prepare_data()` を呼び、
   未取得なら確認なしに約 16GB のダウンロードを開始するため、検証を後段に置けない。
 - 検証順序: (1) `data_root` がディレクトリとして存在するか（Req 9.1）、
-  (2) `data_root/visa_pytorch/{category}` または `data_root/{category}` が存在するか、
+  (2) 下記 3 配置のいずれかで `{category}` が存在するか、
   (3) 未準備かつ `allow_download` が false ならエラー（Req 9.3）、
   (4) 未準備で準備を許可する場合、`data_root` が書き込み可能か（Req 9.4）。
+- **準備済みと認める配置は 3 つで、解決した root を戻り値で返す**。`visa_image_source()` に
+  渡す root を guard 自身が決めることで、guard の判定と抽出の入力が食い違わないようにする。
+
+  | 配置 | 返す root |
+  | --- | --- |
+  | `data_root/visa_pytorch/{category}` | `data_root` |
+  | `data_root/{category}` | `data_root` |
+  | `data_root/VisA_pytorch/1cls/{category}` | `data_root/VisA_pytorch/1cls` |
+
+  3 つ目は配布元の `prepare_data.py` が作るレイアウトで、anomalib は
+  `{root}/visa_pytorch/{category}` と `{root}/{category}` だけを見るため、`1cls` を root として
+  渡すと 2 つ目の経路で認識される（`docs/visa-validation-gate.md:112-114`、
+  `research.md` の「VisA の 1cls レイアウト不一致」）。前処理済みデータの流用時に
+  再ダウンロードも再複製も起こさないための経路である。
+- 未準備のときは `data_root` を返す。anomalib が `data_root/visa_pytorch/` を作って複製する。
 - 準備済みの場合は書き込み可否を要求しない。読み取り専用ストレージ上の準備済みデータで
   ゲートを回せるようにするため。
 
 ##### Service Interface (DatasetGuard)
 
 ```python
-def ensure_visa_dataset_ready(
+def resolve_prepared_visa_root(
     data_root: Path,
     category: str,
     allow_download: bool,
-) -> None: ...
+) -> Path: ...                      # visa_image_source() へ渡す root
 ```
 
 - Errors: `DatasetRootMissingError(path)` / `DatasetNotPreparedError(path, category)` /
@@ -1063,6 +1208,9 @@ class GateMetrics(Protocol):
 ##### Responsibilities & Constraints (VisaGate)
 
 - 実行順序は System Flows のシーケンス図のとおり。ロジックは持たず、順序と受け渡しだけを持つ。
+- 抽出の入力は 2 つとも解決済みの値を受け渡すだけにする。root は
+  `resolve_prepared_visa_root()` の戻り値、タイル設定と `BackboneConfig` は
+  `GATE_BACKBONE_PRESETS[config.backbone]` から取り、ゲート側で組み替えない。
 - `train/good` の抽出結果は 2 か所で使う。(1) `RegistrationRequest(kind=NORMAL,
   evidence=DatasetEvidence("visa"))` としてストアへ登録（Req 7.1）、
   (2) Mahalanobis 較正の入力（Requirement 2 の正常特徴供給元）。
@@ -1127,8 +1275,8 @@ class GateRunSummary:
 
 ##### Responsibilities & Constraints (VisaGateCli)
 
-- 引数は `--data-root`（required）、`--category`（既定 `pcb1`、`choices=CATEGORIES`）、
-  `--backbone`（既定 `dinov3`、`choices=BACKBONE_PRESETS.keys()`）、`--output-dir`、
+- 引数は `--data-root`（required）、`--category`（既定 `pcb1`、`choices=VISA_CATEGORIES`）、
+  `--backbone`（既定 `dinov3`、`choices=GATE_BACKBONE_PRESETS.keys()`）、`--output-dir`、
   `--download`（`store_true`、既定 false）の 5 つに限定する。
 - `evaluation_framework` アダプタを構築して `run_visa_gate()` へ渡す唯一の場所。
 - `VisaGateError`・`PrimaryDetectionError`（`NormalReferenceIdentityMismatchError` を含む）・
@@ -1250,7 +1398,21 @@ CLI は実行ディレクトリのパス、登録パッチ数、スコア化画�
   `roi_max_count` で打ち切る（Req 5.3, 5.4）。
 - `DetectionConfig` が空の `method_weights` を構築時に拒否する（Req 3.7）。
 - `VisaGateConfig` が `data_root` 未指定で `ValidationError` になり、既定値を持たない（Req 8.2）。
-- `VisaGateConfig` の `category` 既定が `pcb1` で、`CATEGORIES` 外の値を拒否する（Req 8.3）。
+- `VisaGateConfig` の `category` 既定が `pcb1` で、`VISA_CATEGORIES` 外の値を拒否する（Req 8.3）。
+- `VISA_CATEGORIES` が `anomalib.data.datasets.image.visa.CATEGORIES` と一致する（Req 8.3）。
+  `pytest.importorskip("anomalib")` を付け、`boundary` のテストに置く。写した定数が上流の
+  実測値からずれたときに落ちる回帰点をここ 1 箇所に集める。
+- `GATE_BACKBONE_PRESETS` の 4 件すべてが `BackboneConfig` / `TilingConfig` として構築でき、
+  キー集合が CLI の `choices` と一致する（Req 8.1, 8.5）。プリセットが完全形であること、
+  および `TOKENS` の `feature_layer` が `blocks.<int>` 形式であることを構築時検証で固定する。
+- `resolve_prepared_visa_root` が 3 配置それぞれに対して正しい root を返す（Req 9.3）。
+  とくに `data_root/VisA_pytorch/1cls/{category}` の配置で `data_root/VisA_pytorch/1cls` を
+  返し、`data_root` を返さないことを固定する。guard が準備済みと認めた配置と
+  `visa_image_source()` へ渡す root が食い違わないことの回帰点。
+- `primary_anomaly_detection` の公開面が「公開する面」の 12 シンボルと一致し、
+  `knn_scores` / `fuse_scores` / `compose_heatmap` / `extract_roi_candidates` /
+  `l2_normalize_rows` を公開しない（`visa_gate` が中間層モジュールを直接 import しないことの
+  前提を固定する）。
 - `VisaGateConfig` の `allow_download` 既定が false（Req 9.2）。
 - `GATE_DETECTION_CONFIG` が `KNN` と `MAHALANOBIS` を等重みで持ち、`VisaGateConfig` の
   `detection` 既定がこの定数と一致する（Req 8.5 の `method_weights` 記録元の固定）。
@@ -1260,7 +1422,7 @@ CLI は実行ディレクトリのパス、登録パッチ数、スコア化画�
 - CLI が `VisaGateError` を送出する `run_visa_gate()` に対しては終了コード 1 とメッセージを返し、
   前提条件違反の `ValueError` を送出する場合は捕捉せずそのまま伝播させる。捕捉対象が
   Error Strategy の列挙と一致し、組み込み型まで広がっていないことを固定する。
-- `ensure_visa_dataset_ready` が (a) ルート不在、(b) 未準備かつ未許可、(c) 書込不可 の 3 条件で
+- `resolve_prepared_visa_root` が (a) ルート不在、(b) 未準備かつ未許可、(c) 書込不可 の 3 条件で
   それぞれ別のエラー型を送出する（Req 9.1, 9.3, 9.4）。
 - `allocate_run_dir` が同一条件の 2 回目の呼び出しで別ディレクトリを返す（Req 8.4）。
 
@@ -1276,7 +1438,15 @@ CLI は実行ディレクトリのパス、登録パッチ数、スコア化画�
   ドメイン非依存へフォールバックして `domain_fallback_applied` が true になる（Req 6.4）。
   `GATE_DETECTION_CONFIG` と同じく KNN と MAHALANOBIS の両方を有効にした構成で行い、
   k 近傍側がフォールバック前の 0 件で `NormalBankTooSmallError` にならないことも併せて確認する。
+- k 近傍側は該当あり・Mahalanobis 側は `by_domain` に鍵が無い構成で `detect()` を呼ぶと、
+  `domain_scope` が要求した鍵のまま、`domain_fallback_applied` が true になる（Req 6.4, 6.5）。
+  2 方式のドメイン解決が非対称（ストアは軸ごとの無指定を許し、較正は完全一致）でもエラーに
+  ならず、記録の 2 フィールドが「要求」と「落ち先」を別々に表すことを固定する。
 - ドメインタグが一致しないパッチでも ROI 候補が除外されない（Req 6.3）。
+- `GATE_BACKBONE_PRESETS` の各プリセットについて、実重みで組んだ抽出器の
+  `identity.patch_stride` がプリセットの `tiling.tile_size` を割り切り、
+  `FeatureExtractionEngine` の構築が成功する（Req 8.1）。重みが取得できない環境では skip する。
+  `dinov2` の patch 14 と `tile_size = 518` の組み合わせが実際に通ることを確認する経路。
 - `PrimaryAnomalyDetector.detect()` を同一入力で 2 回実行して
   `patch_scores` / `heatmap` / `roi_candidates` が完全一致する（Req 1.4）。
 - 異なる `embedding_dim` の 2 つの合成バックボーンで、同じ正規化規則によりスコアが
@@ -1305,7 +1475,7 @@ CLI は実行ディレクトリのパス、登録パッチ数、スコア化画�
 `tests/test_visa_gate_e2e.py` は次の 3 条件が揃うときだけ本体を実行し、欠けていれば
 `pytest.skip` する。
 
-- VisA データが取得済みであること（Req 10.2）。判定は `ensure_visa_dataset_ready` が
+- VisA データが取得済みであること（Req 10.2）。判定は `resolve_prepared_visa_root` が
   エラーを出さないことで行う。データルートは環境変数で与える。
 - バックボーン重みが取得できること（既存 `BackboneUnavailableError` → skip の踏襲）。
 - `evaluation_framework` が import できること（`pytest.importorskip`）。前倒し実装が
