@@ -65,8 +65,8 @@ FAISS ベースの特徴量ストア、HITL（ROI 注釈＋自然言語コメン
     入力アダプタが所有し、anomalib の型を下流に漏らさない
     （ssl-vit-feature-extraction ↔ primary-anomaly-detection ↔ evaluation-framework）
   - 検証ゲート用に前倒しする image-level AUROC・AUPRO。実装は evaluation-framework が所有し、
-    呼び出しは合成ルート（CLI）に限る。依存順序上は seam として扱い循環依存にしない
-    （evaluation-framework ↔ primary-anomaly-detection）
+    呼び出しは合成ルート `visa_gate` に限る。`primary_anomaly_detection → evaluation_framework`
+    は作らない（evaluation-framework ↔ visa_gate）
   - パッチ特徴のテンソル形状・位置/ドメインメタデータ
     （ssl-vit-feature-extraction ↔ patch-feature-store ↔ primary-anomaly-detection）
   - バックボーン同一性（モデル名・重みリビジョン・前処理条件・埋め込み次元）
@@ -88,8 +88,9 @@ FAISS ベースの特徴量ストア、HITL（ROI 注釈＋自然言語コメン
 
 - [x] ssl-vit-feature-extraction -- データセット入力アダプタ、タイル化・パッチ化と固定 SSL ViT（DINOv3 主軸。anomalib TimmFeatureExtractor）によるパッチ特徴抽出. Dependencies: none
 - [x] patch-feature-store -- FAISS kNN インデックス＋ドメイン分割・coreset・増分追加を備えた特徴量ストア. Dependencies: ssl-vit-feature-extraction
-- [ ] primary-anomaly-detection -- Mahalanobis／kNN 距離の融合による異常スコア化・ヒートマップ・ROI 候補抽出. Dependencies: ssl-vit-feature-extraction, patch-feature-store
-  - 完了条件に VisA 検証ゲート（メモリバンク構築 → 一次検出 → 最小指標の通し実行）を置く
+- [x] primary-anomaly-detection -- Mahalanobis／kNN 距離の融合による異常スコア化・ヒートマップ・ROI 候補抽出. Dependencies: ssl-vit-feature-extraction, patch-feature-store
+  - 完了: 2026-08-18。合成ルートは `visa_gate`。image-level AUROC／AUPRO は
+    `evaluation-framework` 未実装のためゲートの数値通過は未観測
     （`docs/visa-validation-gate.md`）。
 - [ ] llm-feedback-structuring -- ROI 注釈＋自然言語コメントの受付と、LLM による運用スキーマ JSON 化・スキーマ検証・監査ログ. Dependencies: primary-anomaly-detection
 - [ ] promptable-correction-layer -- roi_embedding とプロトタイプの近傍照合＋適用条件マッチによるスコア再構成と最終判定. Dependencies: ssl-vit-feature-extraction, patch-feature-store, primary-anomaly-detection, llm-feedback-structuring

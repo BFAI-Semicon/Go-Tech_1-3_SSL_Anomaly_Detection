@@ -6,19 +6,25 @@
 外側はバージョン管理・オントロジー・アプリ合成（`docs/package-dependency-direction.md`）。
 依存は常に内側へ。差し替え点は Protocol（例: `SimilaritySource`・`AxisMatcher`）で逆転する。
 
-実装済みパッケージは `correction_layer`（補正レイヤ）・`feature_extraction`（パッチ特徴抽出）・
-`patch_feature_store`（パッチ特徴ストア）。3 つは同じ層パターンで、中間層の名前だけが
-関心事に応じて変わる。
+実装済みパッケージは `correction_layer`・`feature_extraction`・`patch_feature_store`・
+`primary_anomaly_detection`・`visa_gate`。前 4 つは同じ層パターンで、中間層の名前だけが
+関心事に応じて変わる。`visa_gate` は合成ルート専用で、検出ロジックを持たない。
 
 - `model` — 型・設定・port（最内側）
 - 中間層 — 互いに独立し model のみに依存（判定は `decision`、幾何計算は `geometry`、
-  台帳と純粋ロジックは `catalog`、外部 I/O・外部ライブラリは `boundary`）
-- `engine` — composition root。具体実装ではなく port を注入される。関心事が増えたら
-  `engine_snapshot` のように第 2 段を切り出し、layers 契約にも段を足す
+  台帳と純粋ロジックは `catalog`、スコア化は `scoring`、ヒートマップ／ROI は
+  `localization`、外部 I/O・外部ライブラリは `boundary`）
+- composition root — 具体実装ではなく port を注入される。ドメインパッケージは `engine`、
+  合成ルートパッケージは `gate`（＋ `cli`）。関心事が増えたら `engine_snapshot` のように
+  第 2 段を切り出し、layers 契約にも段を足す
 
 外部 ML ライブラリ（torch／timm／anomalib／faiss）は `boundary` の内側だけで import する。
-パッケージ間の依存も一方向で、`patch_feature_store` → `feature_extraction` の向きだけを許す
-（逆流と相互依存は両向きの forbidden 契約で止める）。
+`primary_anomaly_detection` はこれらを直接 import せず、ストアへの到達も
+`boundary/store_neighbors` に閉じる。パッケージ間の依存も一方向。
+`patch_feature_store` → `feature_extraction`、`visa_gate` → 抽出／ストア／一次検出、
+を許し、逆流と相互依存は forbidden 契約で止める。
+`primary_anomaly_detection → evaluation_framework` は作らない（指標は port 越し。
+実装は評価基盤が所有し、呼び出しは合成ルートに限る）。
 層間・モジュール間の依存方向とこの禁止規則は `pyproject.toml` の contracts に書き、
 `import-linter` で CI 検査する。
 
@@ -96,6 +102,7 @@ mise run lint-md
 uv run ruff check .
 PYTHONPATH=src uv run lint-imports
 uv run pytest
+mise run visa-gate -- --data-root <VisA> --output-dir <out>
 ```
 
 ## Key Technical Decisions
@@ -113,8 +120,15 @@ uv run pytest
   （1 − 類似度）、識別子指定の問い合わせは類似度で返す（補正レコードのしきい値が類似度）
 - **状態変更は準備 → コミットの 2 段** — 索引と台帳のように二重に持つ状態は、計画を確定してから
   順に反映する。複数ファイルの更新はディレクトリ差し替えで行い、部分適用を残さない
+- **未実装パッケージへの依存は合成ルートに閉じる** — 指標計算は `evaluation_framework` が所有する。
+  検出パッケージから評価基盤を import せず、合成ルート（`visa_gate`）が `GateMetrics` port で呼ぶ。
+  実装前はアダプタが失敗し、E2E は skip する
+- **ストアは正常ベクトルの読み出しを公開しない** — Mahalanobis 較正の入力は呼び出し側が渡す。
+  較正型は検出器の引数型なので公開面に出す。内部のスコア関数は公開しない
 - **公開データセットは VisA** — CC BY 4.0（商用可）。CC BY-NC-SA 4.0 の MVTec AD は使わない。
-  spec 4 の完了条件は VisA 検証ゲート（`docs/visa-validation-gate.md`）
+  spec 4 の完了条件は VisA 検証ゲート（`docs/visa-validation-gate.md`）。配線は `visa_gate`。
+  オリジナルデータ用の合成ルートは `visa_gate` に足さない
+  （`docs/original-data-primary-detection.md`）
 - **正常のみの実機データでは AUROC 系を使わない** — 過検出率・安定性・ドメインシフト影響量で
   評価する。分割は複数バンク＋共通評価集合、グループキーはウェハ／ロット／撮像日
   （`docs/normal-only-validation-plan.md`）
