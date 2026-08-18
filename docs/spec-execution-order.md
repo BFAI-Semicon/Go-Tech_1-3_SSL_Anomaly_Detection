@@ -10,14 +10,21 @@ roadmap の依存順（ssl-vit → store → primary → llm → correction → 
 実施が完了した項目にチェックを付ける。
 
 1. [x] **promptable-correction-layer（前半）**（開発計画 Phase 0–3 の範囲に限定）
+   合成 fixture 上で補正判定チェーンを完結する。完了: 2026-07-31
 2. [x] **ssl-vit-feature-extraction**
+   重み固定 ViT/CNN からパッチ特徴・座標・抽出器同一性を出す。完了: 2026-08-13
 3. [x] **patch-feature-store**（Lance / LanceDB スパイク判断は bank 版管理＝補正レイヤ Phase 5 送り）
-4. [ ] **primary-anomaly-detection**（完了条件に
+   パッチ特徴の近傍探索・登録・coreset・スナップショットを完結する。完了: 2026-08-14
+4. [x] **primary-anomaly-detection**（完了条件に
    [VisA 検証ゲート](./visa-validation-gate.md) を置く）
+   k 近傍と Mahalanobis でスコア化し、抽出→ストア→検出の合成ルートを通す。完了: 2026-08-18
 5. [ ] **llm-feedback-structuring**
+   HITL フィードバックを LLM で構造化 JSON にする。
 6. [ ] **evaluation-framework**（指標・プロトコル定義と、ゲート用の最小指標のみ 4 と並行前倒し可）
+   指標・プロトコルを定義し、ゲート用の AUROC/AUPRO を実装する。
 7. [ ] **promptable-correction-layer（後半）**（Phase 4–7：バージョン管理・オントロジー、
    Phase 8：実パイプライン統合・評価）
+   バージョン管理・オントロジーと実パイプライン統合を足す。
 
 ## 並べ替えの理由
 
