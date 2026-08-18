@@ -30,3 +30,7 @@ run = "markdownlint-cli2"
 [tasks.lint-md-fix]
 description = "Markdown の自動修正可能な指摘を修正"
 run = "markdownlint-cli2 --fix"
+
+[tasks.visa-gate]
+description = "VisA 検証ゲートを起動する"
+run = "PYTHONPATH=src uv run python scripts/visa_gate.py"

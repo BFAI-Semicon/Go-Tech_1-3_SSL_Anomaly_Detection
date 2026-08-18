@@ -1,0 +1,867 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>primary-anomaly-detection 設計サマリ</title>
+<style>
+  :root {
+    color-scheme: only light;
+    --bg: #fcfcfc;
+    --bg-soft: #f4f4f5;
+    --bg-code: #f1f1f3;
+    --fg: #17181c;
+    --fg-2: #4b4d55;
+    --fg-3: #74767f;
+    --line: #dcdce0;
+    --line-2: #ebebee;
+    --accent: #2f6fb0;
+    --accent-bg: #eaf1f8;
+    --warn-bg: #fdf6e7;
+    --warn-line: #e0c48a;
+    --ok: #1f7a55;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  }
+  * { box-sizing: border-box; }
+  html {
+    scroll-behavior: smooth;
+    background: #fcfcfc;
+    color: #17181c;
+  }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background: #fcfcfc;
+    color: #17181c;
+    font-family: system-ui, -apple-system, "Hiragino Kaku Gothic ProN", "Noto Sans JP", Meiryo, sans-serif;
+    font-size: 15px;
+    line-height: 1.75;
+  }
+  .layout {
+    display: grid;
+    grid-template-columns: 232px minmax(0, 1fr);
+    gap: 40px;
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 40px 28px 96px;
+  }
+  nav {
+    position: sticky;
+    top: 32px;
+    align-self: start;
+    font-size: 13px;
+    border-left: 1px solid var(--line);
+    padding-left: 14px;
+  }
+  nav p { margin: 0 0 10px; color: var(--fg-3); letter-spacing: .04em; }
+  nav ol { list-style: none; margin: 0; padding: 0; }
+  nav li { margin: 0 0 4px; }
+  nav a { color: var(--fg-2); text-decoration: none; }
+  nav a:hover { color: var(--accent); }
+  header h1 { font-size: 27px; line-height: 1.4; margin: 0 0 6px; letter-spacing: -.01em; }
+  header .src { color: var(--fg-3); font-size: 13px; margin: 0; }
+  section { margin-top: 52px; }
+  section > h2 {
+    font-size: 19px;
+    margin: 0 0 14px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--line);
+  }
+  h3 { font-size: 15px; margin: 28px 0 8px; }
+  p { margin: 0 0 12px; }
+  .lead { font-size: 16px; }
+  code, .mono { font-family: var(--mono); font-size: .9em; }
+  p code, li code, td code, th code, summary code, figcaption code {
+    background: var(--bg-code);
+    border-radius: 4px;
+    padding: .1em .35em;
+  }
+  pre {
+    background: var(--bg-code);
+    border: 1px solid var(--line-2);
+    border-radius: 8px;
+    padding: 14px 16px;
+    overflow-x: auto;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    line-height: 1.6;
+    margin: 0 0 12px;
+  }
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 12px;
+    margin: 20px 0 0;
+  }
+  .stat { border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; }
+  .stat b { display: block; font-size: 26px; font-weight: 600; line-height: 1.2; letter-spacing: -.02em; }
+  .stat span { color: var(--fg-3); font-size: 12px; }
+  table { width: 100%; border-collapse: collapse; margin: 0 0 12px; font-size: 13.5px; }
+  th, td { text-align: left; vertical-align: top; padding: 8px 10px; border-bottom: 1px solid var(--line-2); }
+  th { color: var(--fg-3); font-weight: 600; font-size: 12px; letter-spacing: .03em; border-bottom: 1px solid var(--line); }
+  tbody tr:hover { background: var(--bg-soft); }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  td.k { white-space: nowrap; font-family: var(--mono); font-size: 12.5px; }
+  .own-self td:last-child { color: var(--ok); }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
+  .card { border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; }
+  .card h4 { margin: 0 0 6px; font-size: 13px; color: var(--fg-3); font-weight: 600; }
+  .card p { margin: 0; font-size: 13.5px; }
+  .card p + p { margin-top: 8px; color: var(--fg-2); }
+  figure { margin: 0 0 12px; }
+  figure svg { display: block; width: 100%; height: auto; }
+  figcaption { color: var(--fg-3); font-size: 12.5px; margin-top: 8px; }
+  details {
+    border-bottom: 1px solid var(--line-2);
+    padding: 10px 0;
+  }
+  details summary { cursor: pointer; font-weight: 600; font-size: 14px; }
+  details summary::marker { color: var(--fg-3); }
+  details > div { margin-top: 8px; font-size: 13.5px; color: var(--fg-2); }
+  .note {
+    border: 1px solid var(--warn-line);
+    background: var(--warn-bg);
+    border-radius: 8px;
+    padding: 14px 18px;
+  }
+  .note h3 { margin: 0 0 8px; font-size: 14px; }
+  .note ul { margin: 0; padding-left: 20px; font-size: 13.5px; }
+  .note li { margin-bottom: 3px; }
+  .accent-box {
+    border: 1px solid var(--accent);
+    background: var(--accent-bg);
+    border-radius: 8px;
+    padding: 14px 18px;
+    font-size: 13.5px;
+  }
+  .accent-box h3 { margin: 0 0 8px; font-size: 14px; }
+  .accent-box ul { margin: 0; padding-left: 20px; }
+  ul.tight { margin: 0 0 12px; padding-left: 20px; }
+  ul.tight li { margin-bottom: 4px; }
+  ol.steps { margin: 0 0 12px; padding-left: 22px; font-size: 13.5px; }
+  ol.steps li { margin-bottom: 5px; }
+  .bars { display: grid; grid-template-columns: max-content minmax(0, 1fr) max-content; gap: 6px 12px; align-items: center; font-size: 13.5px; }
+  .bars .track { background: var(--bg-soft); border-radius: 3px; height: 14px; }
+  .bars .fill { background: var(--accent); height: 14px; border-radius: 3px; }
+  .bars .v { color: var(--fg-3); font-variant-numeric: tabular-nums; }
+  .tag {
+    display: inline-block;
+    font-size: 11px;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 0 6px;
+    color: var(--fg-3);
+    white-space: nowrap;
+  }
+  footer { margin-top: 64px; padding-top: 16px; border-top: 1px solid var(--line); color: var(--fg-3); font-size: 12.5px; }
+  @media (max-width: 900px) {
+    .layout { grid-template-columns: minmax(0, 1fr); gap: 0; padding: 24px 18px 64px; }
+    nav { position: static; border-left: 0; border-bottom: 1px solid var(--line); padding: 0 0 16px; margin-bottom: 8px; }
+    nav ol { columns: 2; }
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+
+<nav>
+  <p>目次</p>
+  <ol>
+    <li><a href="#overview">1. この spec の要旨</a></li>
+    <li><a href="#architecture">2. 2 パッケージと依存方向</a></li>
+    <li><a href="#decisions">3. 4 つの設計判断</a></li>
+    <li><a href="#flow">4. 検出フローと分岐</a></li>
+    <li><a href="#methods">5. 2 つのスコア方式</a></li>
+    <li><a href="#normalize">6. L2 正規化が起きる 3 箇所</a></li>
+    <li><a href="#localization">7. ヒートマップと ROI</a></li>
+    <li><a href="#domain">8. ドメイン別突き合わせ</a></li>
+    <li><a href="#gate">9. VisA 検証ゲート</a></li>
+    <li><a href="#api">10. 公開 API</a></li>
+    <li><a href="#errors">11. エラーの分類</a></li>
+    <li><a href="#ownership">12. 所有と非所有</a></li>
+    <li><a href="#traceability">13. 要件との対応</a></li>
+    <li><a href="#contracts">14. import-linter 契約</a></li>
+    <li><a href="#tests">15. テスト計画</a></li>
+    <li><a href="#perf">16. 性能とリスク</a></li>
+    <li><a href="#retrigger">17. 再検証トリガー</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<header>
+  <h1>primary-anomaly-detection 設計サマリ</h1>
+  <p class="src">出典: <code>.kiro/specs/primary-anomaly-detection/design.md</code>（全 1343 行）を要約したもの。判断の根拠と代替案比較は同ディレクトリの <code>research.md</code> にある。</p>
+</header>
+
+<section id="overview">
+  <h2>1. この spec の要旨</h2>
+  <p class="lead">固定 SSL ViT が出力したパッチ特徴を<strong>正常分布と突き合わせ</strong>、教師なしで欠陥候補ヒートマップと ROI 候補を得る一次検出を作る。あわせて、特徴抽出からスコア出力までを初めて端から端まで通す <strong>VisA 検証ゲート CLI</strong> を用意する。</p>
+  <p><code>feature_extraction</code>（パッチ特徴抽出）と <code>patch_feature_store</code>（正常メモリバンク）は既に実装済みだが、両者を通す合成ルートが存在しない。本 spec が新規 2 パッケージを積んでパイプラインを接続する。</p>
+
+  <div class="cards">
+    <div class="card">
+      <h4>src/primary_anomaly_detection/</h4>
+      <p>Req 1–6。特徴 → スコア → ヒートマップ → ROI だけを持つ。</p>
+      <p>データセット・永続化・指標を一切知らない。numpy と scipy のみで書く。</p>
+    </div>
+    <div class="card">
+      <h4>src/visa_gate/</h4>
+      <p>Req 7–10。ロジックを持たず、順序と配線と入出力だけを持つ合成ルート。</p>
+      <p>CLI を別パッケージにするのは循環依存の回避のため（判断 1）。</p>
+    </div>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><b>2</b><span>新規パッケージ</span></div>
+    <div class="stat"><b>10</b><span>要件</span></div>
+    <div class="stat"><b>46</b><span>受入基準</span></div>
+    <div class="stat"><b>14</b><span>コンポーネント</span></div>
+    <div class="stat"><b>25</b><span>新規モジュール</span></div>
+    <div class="stat"><b>43</b><span>計画テスト</span></div>
+  </div>
+</section>
+
+<section id="architecture">
+  <h2>2. 2 パッケージと依存方向</h2>
+
+  <figure>
+    <svg viewBox="0 0 880 410" role="img" aria-label="パッケージ間の依存方向">
+      <defs>
+        <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="#2f6fb0"></path>
+        </marker>
+      </defs>
+
+      <rect x="40" y="18" width="520" height="62" rx="8" fill="#eaf1f8" stroke="#2f6fb0"></rect>
+      <text x="56" y="43" font-size="14" font-weight="600" fill="#17181c">visa_gate</text>
+      <text x="130" y="43" font-size="12" fill="#4b4d55">合成ルート（新規） — 全方向へ出せる。逆向きは禁止</text>
+      <text x="56" y="65" font-size="12" fill="#74767f">cli → gate → boundary → model</text>
+
+      <rect x="40" y="140" width="320" height="62" rx="8" fill="#eaf1f8" stroke="#2f6fb0"></rect>
+      <text x="56" y="165" font-size="14" font-weight="600" fill="#17181c">primary_anomaly_detection</text>
+      <text x="56" y="187" font-size="12" fill="#74767f">engine → boundary | scoring | localization → model</text>
+
+      <rect x="620" y="140" width="220" height="62" rx="8" fill="#fdf6e7" stroke="#e0c48a"></rect>
+      <text x="636" y="165" font-size="14" font-weight="600" fill="#17181c">evaluation_framework</text>
+      <text x="636" y="187" font-size="12" fill="#74767f">AUROC / AUPRO・現時点で未実装</text>
+
+      <rect x="40" y="252" width="320" height="52" rx="8" fill="#f4f4f5" stroke="#dcdce0"></rect>
+      <text x="56" y="273" font-size="14" font-weight="600" fill="#17181c">patch_feature_store</text>
+      <text x="56" y="292" font-size="12" fill="#74767f">実装済み。正常メモリバンクと近傍探索</text>
+
+      <rect x="40" y="336" width="320" height="52" rx="8" fill="#f4f4f5" stroke="#dcdce0"></rect>
+      <text x="56" y="357" font-size="14" font-weight="600" fill="#17181c">feature_extraction</text>
+      <text x="56" y="376" font-size="12" fill="#74767f">実装済み。パッチ特徴・位置・同一性メタの生成</text>
+
+      <path d="M 130 80 V 140" fill="none" stroke="#2f6fb0" stroke-width="1.4" marker-end="url(#arrow)"></path>
+      <path d="M 470 80 V 278 H 368" fill="none" stroke="#2f6fb0" stroke-width="1.4" marker-end="url(#arrow)"></path>
+      <path d="M 470 278 V 362 H 368" fill="none" stroke="#2f6fb0" stroke-width="1.4" marker-end="url(#arrow)"></path>
+      <path d="M 560 49 H 830 V 140" fill="none" stroke="#2f6fb0" stroke-width="1.4" marker-end="url(#arrow)"></path>
+      <path d="M 200 202 V 252" fill="none" stroke="#2f6fb0" stroke-width="1.4" marker-end="url(#arrow)"></path>
+      <path d="M 200 304 V 336" fill="none" stroke="#2f6fb0" stroke-width="1.4" marker-end="url(#arrow)"></path>
+
+      <text x="212" y="230" font-size="11.5" fill="#2f6fb0">boundary/store_neighbors.py からのみ</text>
+      <text x="600" y="118" font-size="11.5" fill="#2f6fb0">port 経由（metrics_adapter のみ）</text>
+    </svg>
+    <figcaption>矢印は import の向き。<code>primary_anomaly_detection</code> がストアに触れられるのは <code>boundary</code> の 1 モジュールだけで、これを import-linter が CI で強制する。</figcaption>
+  </figure>
+
+  <h3>層の中身</h3>
+  <pre>src/primary_anomaly_detection/
+├── model/       types / config / results / errors / ports        設定・結果型・port 定義
+├── scoring/     knn / mahalanobis / fusion                       スコア算出と正規化
+├── localization/heatmap / roi                                    画素格子合成と ROI 切り出し
+├── boundary/    store_neighbors                                  PatchFeatureStore への適合
+└── engine.py    PrimaryAnomalyDetector                           合成と検査順の固定
+
+src/visa_gate/
+├── model/       config / results / errors / ports                実行条件・成果物型・指標 port
+├── boundary/    dataset_guard / extraction_assembly /            外部との配線
+│                store_assembly / run_artifacts / metrics_adapter
+├── gate.py      run_visa_gate                                    通し実行
+└── cli.py       argparse と終了コード</pre>
+  <p>同一中間層のモジュール同士は import しない（<code>scoring/*</code> 相互、<code>localization/*</code> 相互、<code>visa_gate/boundary/*</code> 相互）。配線は <code>engine.py</code> と <code>gate.py</code> だけが行う。</p>
+
+  <h3>技術スタック</h3>
+  <table>
+    <thead><tr><th>層</th><th>選択</th><th>役割</th><th>備考</th></tr></thead>
+    <tbody>
+      <tr><td>CLI</td><td class="k">argparse</td><td>ゲート引数の解釈</td><td><code>package = false</code> のため <code>scripts/</code> から起動</td></tr>
+      <tr><td>数値計算</td><td class="k">numpy &gt;=2.1,&lt;3</td><td>スコア・共分散・合成</td><td>既存依存</td></tr>
+      <tr><td>線形代数</td><td class="k">linalg.cholesky / solve</td><td>Mahalanobis 距離</td><td>追加依存なし。逆行列は作らない</td></tr>
+      <tr><td>連結成分</td><td class="k">scipy.ndimage.label</td><td>ROI 切り出し</td><td>既存依存だが本 spec が初使用</td></tr>
+      <tr><td>近傍探索</td><td class="k">patch_feature_store</td><td>k 近傍距離</td><td>FAISS Flat。API を呼ぶだけ</td></tr>
+      <tr><td>指標</td><td class="k">evaluation_framework</td><td>AUROC / AUPRO</td><td>port 経由。未実装</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="decisions">
+  <h2>3. 4 つの設計判断</h2>
+  <div class="cards">
+    <div class="card">
+      <h4>判断 1 ｜ 合成ルートを別パッケージにする</h4>
+      <p>CLI を <code>primary_anomaly_detection</code> 内に置くと、パッケージ単位で <code>primary_anomaly_detection → evaluation_framework</code> の import が生まれる。</p>
+      <p>将来の <code>evaluation_framework → primary_anomaly_detection</code> と相互依存になり、steering が両向きの forbidden contract で禁止している形に触れる。だから <code>visa_gate</code> を切り出す。</p>
+    </div>
+    <div class="card">
+      <h4>判断 2 ｜ Mahalanobis の正常特徴は呼び出し側が供給する</h4>
+      <p>ストアは正常ベクトルの読み出しを公開していない。読み出し API を足すのは <code>patch-feature-store</code> の公開契約変更であり境界外。</p>
+      <p>VisA ゲートは登録前の正常パッチ特徴を手元に持つので、同じ配列をストア登録と較正の両方へ渡す。この二重利用が唯一の成立経路。</p>
+    </div>
+    <div class="card">
+      <h4>判断 3 ｜ 共通尺度は次元非依存の固定写像</h4>
+      <p>k 近傍は <code>mean(コサイン距離) / 2</code>、Mahalanobis は <code>d / (d + sqrt(D))</code>。どちらも埋め込み次元 <code>D</code> が変わっても同じ規則で <code>[0, 1)</code> に収まる。</p>
+      <p>画像内 z-score や順位化は採らない。画像ごとに尺度が変わると image-level 比較が壊れるため。</p>
+    </div>
+    <div class="card">
+      <h4>判断 4 ｜ 画素格子は positions から復元する</h4>
+      <p><code>PatchFeatureSet</code> は画像 H/W を持たないが、<code>max(top) + patch_stride</code> と <code>max(left) + patch_stride</code> が厳密に H/W と一致する。</p>
+      <p>呼び出し側から H/W を別経路で受け取る形は採らない。特徴と食い違ったときに誤りを検出できなくなるため。</p>
+    </div>
+  </div>
+</section>
+
+<section id="flow">
+  <h2>4. 検出フローと分岐</h2>
+
+  <figure>
+    <svg viewBox="0 0 880 600" role="img" aria-label="detect の実行フロー">
+      <defs>
+        <marker id="arrow2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="#2f6fb0"></path>
+        </marker>
+        <marker id="arrow3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="#b08a2f"></path>
+        </marker>
+      </defs>
+
+      <rect x="30" y="14" width="330" height="44" rx="8" fill="#f4f4f5" stroke="#dcdce0"></rect>
+      <text x="46" y="41" font-size="13" fill="#17181c">PatchFeatureSet 受領</text>
+
+      <rect x="30" y="86" width="330" height="44" rx="8" fill="#eaf1f8" stroke="#2f6fb0"></rect>
+      <text x="46" y="113" font-size="13" fill="#17181c">① 同一性照合（normal_identity と比較）</text>
+
+      <rect x="30" y="158" width="330" height="44" rx="8" fill="#eaf1f8" stroke="#2f6fb0"></rect>
+      <text x="46" y="185" font-size="13" fill="#17181c">② 行ごとに L2 正規化（ノルム 0 を検査）</text>
+
+      <rect x="30" y="230" width="160" height="60" rx="8" fill="#f4f4f5" stroke="#dcdce0"></rect>
+      <text x="44" y="254" font-size="13" fill="#17181c">③a k 近傍</text>
+      <text x="44" y="274" font-size="11.5" fill="#74767f">ストアへ 1 パッチ 1 回</text>
+
+      <rect x="200" y="230" width="160" height="60" rx="8" fill="#f4f4f5" stroke="#dcdce0"></rect>
+      <text x="214" y="254" font-size="13" fill="#17181c">③b Mahalanobis</text>
+      <text x="214" y="274" font-size="11.5" fill="#74767f">Cholesky 解で距離</text>
+
+      <rect x="30" y="318" width="330" height="44" rx="8" fill="#f4f4f5" stroke="#dcdce0"></rect>
+      <text x="46" y="345" font-size="13" fill="#17181c">④ 重み付き平均で融合</text>
+
+      <rect x="30" y="390" width="330" height="44" rx="8" fill="#f4f4f5" stroke="#dcdce0"></rect>
+      <text x="46" y="417" font-size="13" fill="#17181c">⑤ パッチ位置で画素格子へ平均合成</text>
+
+      <rect x="30" y="462" width="330" height="44" rx="8" fill="#f4f4f5" stroke="#dcdce0"></rect>
+      <text x="46" y="489" font-size="13" fill="#17181c">⑥ 分位点しきい値と連結成分で ROI 抽出</text>
+
+      <rect x="30" y="534" width="330" height="44" rx="8" fill="#eaf1f8" stroke="#2f6fb0"></rect>
+      <text x="46" y="561" font-size="13" font-weight="600" fill="#17181c">PrimaryDetection を返す</text>
+
+      <path d="M 195 58 V 86" fill="none" stroke="#2f6fb0" stroke-width="1.4" marker-end="url(#arrow2)"></path>
+      <path d="M 195 130 V 158" fill="none" stroke="#2f6fb0" stroke-width="1.4" marker-end="url(#arrow2)"></path>
+      <path d="M 110 202 V 230" fill="none" stroke="#2f6fb0" stroke-width="1.4" marker-end="url(#arrow2)"></path>
+      <path d="M 280 202 V 230" fill="none" stroke="#2f6fb0" stroke-width="1.4" marker-end="url(#arrow2)"></path>
+      <path d="M 110 290 V 318" fill="none" stroke="#2f6fb0" stroke-width="1.4" marker-end="url(#arrow2)"></path>
+      <path d="M 280 290 V 318" fill="none" stroke="#2f6fb0" stroke-width="1.4" marker-end="url(#arrow2)"></path>
+      <path d="M 195 362 V 390" fill="none" stroke="#2f6fb0" stroke-width="1.4" marker-end="url(#arrow2)"></path>
+      <path d="M 195 434 V 462" fill="none" stroke="#2f6fb0" stroke-width="1.4" marker-end="url(#arrow2)"></path>
+      <path d="M 195 506 V 534" fill="none" stroke="#2f6fb0" stroke-width="1.4" marker-end="url(#arrow2)"></path>
+
+      <rect x="450" y="86" width="400" height="44" rx="8" fill="#fdf6e7" stroke="#e0c48a"></rect>
+      <text x="466" y="113" font-size="12.5" fill="#17181c">不一致 → NormalReferenceIdentityMismatchError</text>
+
+      <rect x="450" y="158" width="400" height="44" rx="8" fill="#fdf6e7" stroke="#e0c48a"></rect>
+      <text x="466" y="185" font-size="12.5" fill="#17181c">ノルム 0 の行 → ValueError（1 件もスコアを返さない）</text>
+
+      <rect x="450" y="230" width="400" height="80" rx="8" fill="#fdf6e7" stroke="#e0c48a"></rect>
+      <text x="466" y="251" font-size="12.5" fill="#17181c">③a 空結果 → プールへ再探索（フォールバック）</text>
+      <text x="486" y="272" font-size="12.5" fill="#17181c">再探索後も k 未満 → NormalBankTooSmallError</text>
+      <text x="466" y="295" font-size="12.5" fill="#17181c">③b 対応較正なし → プール較正へフォールバック</text>
+
+      <rect x="450" y="462" width="400" height="44" rx="8" fill="#f4f4f5" stroke="#dcdce0"></rect>
+      <text x="466" y="489" font-size="12.5" fill="#17181c">超過画素なし → 空タプル（エラーにしない）</text>
+
+      <path d="M 360 108 H 450" fill="none" stroke="#b08a2f" stroke-width="1.4" marker-end="url(#arrow3)"></path>
+      <path d="M 360 180 H 450" fill="none" stroke="#b08a2f" stroke-width="1.4" marker-end="url(#arrow3)"></path>
+      <path d="M 360 260 H 450" fill="none" stroke="#b08a2f" stroke-width="1.4" marker-end="url(#arrow3)"></path>
+      <path d="M 360 484 H 450" fill="none" stroke="#b08a2f" stroke-width="1.4" marker-end="url(#arrow3)"></path>
+    </svg>
+    <figcaption>①②の順序はスコア方式の構成に依らず必ず通る。<code>MAHALANOBIS</code> 単独構成ではストアを呼ばないため、検出器側にこの 2 つの検査点が無いと同一性不一致も退化入力も無音で通ってしまう。</figcaption>
+  </figure>
+
+  <h3>検査順が固定されている理由</h3>
+  <table>
+    <thead><tr><th>順</th><th>検査</th><th>この順序でないと起きること</th></tr></thead>
+    <tbody>
+      <tr><td class="num">1</td><td>同一性照合</td><td>後回しにすると、別のバックボーンで作った分布と突き合わせたスコアが返る。<code>MAHALANOBIS</code> 単独ではストア側の照合が働かない</td></tr>
+      <tr><td class="num">2</td><td>形状検査</td><td>—</td></tr>
+      <tr><td class="num">3</td><td>ノルム検査（正規化時）</td><td>ゼロ除算由来の nan が <code>numpy.quantile</code> まで流れ、しきい値比較が全画素 false になる。ROI 空・エラー無しという「距離だけが無意味」な失敗が表に出ない</td></tr>
+    </tbody>
+  </table>
+  <p>同一性不一致とノルム 0 の行が同時に成り立つ入力では、先に通る同一性照合のエラーが出る。この順序自体をテストで固定する。</p>
+</section>
+
+<section id="methods">
+  <h2>5. 2 つのスコア方式</h2>
+  <table>
+    <thead><tr><th>観点</th><th>k 近傍距離（Req 1）</th><th>Mahalanobis 距離（Req 2）</th></tr></thead>
+    <tbody>
+      <tr><td>突き合わせ先</td><td>正常メモリバンク（<code>search_normal</code>）</td><td>正常特徴から推定した平均と共分散</td></tr>
+      <tr><td>入力の供給元</td><td>ストアが所有</td><td><strong>呼び出し側が <code>(N, D)</code> 配列で渡す</strong></td></tr>
+      <tr><td>生の距離</td><td>コサイン距離 <code>[0, 2]</code> の上位 k 件の平均</td><td><code>L z = (x - mu)</code> を三角行列で解いて <code>d = ‖z‖</code></td></tr>
+      <tr><td>正規化</td><td class="k">mean / 2.0 → [0, 1]</td><td class="k">d / (d + sqrt(D)) → [0, 1)</td></tr>
+      <tr><td>保持する状態</td><td>持たない</td><td>十分統計量（件数・和ベクトル・スキャッタ行列）と Cholesky 因子</td></tr>
+      <tr><td>不足時のエラー</td><td><code>NormalBankTooSmallError</code>（取得件数 &lt; k）</td><td><code>NormalFeatureCountInsufficientError</code>（<code>N &lt; D+1</code> または分解失敗）</td></tr>
+      <tr><td>フォールバック検知</td><td><code>search_normal</code> が空タプルを返す</td><td><code>select()</code> に対応ドメインの較正が無い</td></tr>
+      <tr><td>記録項目</td><td class="k">provenance.neighbor_count</td><td class="k">provenance.normal_feature_count</td></tr>
+    </tbody>
+  </table>
+
+  <div class="accent-box">
+    <h3>較正を十分統計量で持つ意味</h3>
+    <ul>
+      <li>平均は <code>sum_vector / sample_count</code>、共分散は <code>(scatter - sample_count · mu muᵀ) / (sample_count - 1)</code> として導出する。元の特徴配列 <code>(N, D)</code> は保持しない。</li>
+      <li>再較正（Req 2.4）は統計量に追加分を足すだけなので、<code>fit(A).extend(B)</code> と <code>fit(concat(A, B))</code> が同じ平均・共分散になる。これを不変条件としてテストで固定する。</li>
+      <li>共分散にリッジ項（<code>eps * I</code>）や縮約は入れない。入れると常に計算できてしまい、Req 2.3 の「不足していることが分かるエラー」が働かなくなる。</li>
+      <li><code>D = 384</code> のとき較正 1 件はスキャッタ行列と Cholesky 因子で約 2.4MB。Cholesky は <code>fit</code> / <code>extend</code> の 1 回だけで、<code>scores()</code> では行わない。</li>
+    </ul>
+  </div>
+
+  <h3>融合（Req 3）</h3>
+  <p>融合は重み付き平均 <code>sum(w_i · s_i) / sum(w_i)</code>。各 <code>s_i</code> が <code>[0, 1]</code> なので結果も <code>[0, 1]</code> に収まり、有効方式が 1 つのときは当該方式の正規化スコアそのものになる。方式の走査順は <code>ScoreMethod</code> の宣言順に固定して、浮動小数の加算順まで決定的にする。</p>
+  <p>運用点は分位点だけで与える。<code>DetectionConfig</code> は異常スコアの絶対値しきい値フィールドを持たない。</p>
+</section>
+
+<section id="normalize">
+  <h2>6. L2 正規化が起きる 3 箇所</h2>
+  <p>抽出器は埋め込みを L2 正規化しない（<code>timm_backbone.py</code> の正規化は入力画素の平均・分散正規化と backbone final norm だけ）。したがって正規化が起きるのは次の 3 箇所だけで、この 3 つが揃って初めて 3 経路の尺度が一致する。</p>
+  <table>
+    <thead><tr><th>場所</th><th>所有</th><th>対象</th></tr></thead>
+    <tbody>
+      <tr><td class="k">patch_feature_store/catalog/admission.py</td><td>ストア</td><td>登録ベクトルと問い合わせベクトル</td></tr>
+      <tr><td class="k">MahalanobisCalibration.fit / extend</td><td>本 spec</td><td>較正へ積む正常特徴</td></tr>
+      <tr><td class="k">PrimaryAnomalyDetector.detect</td><td>本 spec</td><td>スコア化する入力埋め込み</td></tr>
+    </tbody>
+  </table>
+  <div class="note">
+    <h3>ここを外すと起きる失敗</h3>
+    <ul>
+      <li>較正だけを未正規化空間に残すと、<code>detect()</code> がスコア化する空間（L2 正規化後）と平均・共分散の空間が食い違う。<strong>エラーにならずに距離だけが無意味になる</strong>。</li>
+      <li>正規化の定義は <code>scoring/mahalanobis.py</code> の <code>l2_normalize_rows()</code> 1 箇所に置き、<code>engine.py</code> も同じ関数を呼ぶだけにする。2 箇所に書くと、片方だけが退化入力の扱いを変えたときに食い違いが再発する。</li>
+      <li>ノルム 0 の行は <code>ValueError</code>。型と判定はストアの <code>admission</code> と揃える。</li>
+    </ul>
+  </div>
+</section>
+
+<section id="localization">
+  <h2>7. ヒートマップと ROI</h2>
+
+  <h3>ヒートマップ合成（Req 4）</h3>
+  <ul class="tight">
+    <li>画素格子は <code>positions</code> から復元する。<code>H = max(top) + patch_stride</code>、<code>W = max(left) + patch_stride</code>。タイル配置が画像全面を被覆し、タイル辺長が <code>patch_stride</code> で割り切れることが上流で保証されているため厳密に一致する。</li>
+      <li><code>patch_stride</code> の供給元は <code>PatchFeatureSet.identity.patch_stride</code>。H/W と刻み幅を同じ特徴集合から導くので、別経路の値と食い違わない。</li>
+    <li>各パッチは <code>[top, top + patch_stride) × [left, left + patch_stride)</code> の矩形へ寄与する。</li>
+    <li>重なり画素は<strong>算術平均</strong>。寄与スコアの総和と寄与回数を別配列に積んで最後に除算するため、パッチの走査順に依存しない。</li>
+  </ul>
+  <p>最大値ではなく平均を採るのは、タイル境界付近の画素だけが系統的に高くなってタイル格子模様が出るのを避けるため。代わりに、小さな欠陥が重なり領域にあると薄まる（<code>overlap = 0</code> でも回避できない）。</p>
+
+  <h3>ROI 切り出し（Req 5）</h3>
+  <table>
+    <thead><tr><th>手順</th><th>内容</th></tr></thead>
+    <tbody>
+      <tr><td>しきい値</td><td><code>numpy.quantile(heatmap, roi_quantile)</code>。判定は<strong>超過</strong>（<code>&gt;</code>）なので、定数ヒートマップでは超過画素が無く空タプルになる</td></tr>
+      <tr><td>連結成分</td><td><code>scipy.ndimage.label</code> を 8 近傍構造（<code>np.ones((3, 3))</code>）で適用</td></tr>
+      <tr><td>各成分</td><td>外接矩形を <code>top</code>/<code>left</code>/<code>height</code>/<code>width</code>、成分内最大スコアを <code>representative_score</code> とする</td></tr>
+      <tr><td>整列と採番</td><td>代表スコア降順・同点は <code>(top, left)</code> 昇順で整列 → <code>roi_max_count</code> で打ち切り → 先頭から <code>roi_id = 1, 2, ...</code></td></tr>
+    </tbody>
+  </table>
+  <p>整列してから採番するので、同一入力に対して同一の識別子になる。</p>
+</section>
+
+<section id="domain">
+  <h2>8. ドメイン別突き合わせ</h2>
+  <p>既定（<code>domain_scoped = false</code>）ではドメインタグを一切参照せず、登録済み正常集合全体を単一プールとして扱う。true にしたときも行うのは「突き合わせ先の分布の選択」だけで、<strong>ドメイン不一致を候補除外の理由には使わない</strong>（フィルタではない）。</p>
+  <p>鍵の解決は <code>detect()</code> が <code>_resolve_domain_scope()</code> で 1 回だけ行い、同じ値を 2 方式へ渡す。<code>domain_scoped</code> が false なら <code>None</code>、true なら <code>features.domain</code> をそのまま返し、軸の欠けを補完も除去もしない。方式ごとに別の解決を行う経路は作らない。</p>
+
+  <div class="accent-box">
+    <h3>2 方式の引き当て範囲は非対称。これを許容する</h3>
+    <p style="margin:0 0 8px">k 近傍側はストアの <code>DomainCriteria</code> に写して引くが、ストアは空集合の軸を「無指定（何にでも一致）」として扱う。一方 Mahalanobis 側は <code>by_domain</code> の<strong>辞書キー完全一致</strong>。同じ鍵でも k 近傍の候補集合のほうが広くなり得る。</p>
+    <p style="margin:0 0 8px">較正側に軸ごとの緩和を実装しないのは、鍵ごとに独立した平均・共分散を持つ較正から「軸を緩めた集合の分布」を合成する手段が無いため。十分統計量を足せるのは同じ母集団の追加分だけで、異なる母集団の合算は <code>fit(A).extend(B) == fit(concat(A, B))</code> の意味を崩す。</p>
+    <p style="margin:0">両方式は該当有無を独立に判定し、<strong>片方だけ該当ありでもエラーにしない</strong>。それぞれが自分の経路でプールへ落ちる。</p>
+  </div>
+  <table>
+    <thead><tr><th>項目</th><th>k 近傍側</th><th>Mahalanobis 側</th></tr></thead>
+    <tbody>
+      <tr><td>検知点</td><td>ドメイン指定の <code>search_normal</code> が空タプルを返す</td><td><code>MahalanobisCalibrationSet.select()</code> に対応較正が無い</td></tr>
+      <tr><td>動作</td><td>同じクエリを <code>domain=None</code> で組み直して再探索</td><td>プール較正へ切り替え</td></tr>
+      <tr><td>伝達口</td><td><code>neighbor_distances()</code> の 2 要素目</td><td><code>select()</code> の 2 要素目</td></tr>
+    </tbody>
+  </table>
+  <p>件数不足の判定は<strong>フォールバック後</strong>の距離列に対して行う。そのため「ドメイン指定で 0 件」がバンク件数不足として誤検知されることはない。<code>detect()</code> は有効な方式の分だけ論理和を取り、結果に 1 つの <code>domain_fallback_applied</code> として集約する。</p>
+
+  <h3>記録は 2 フィールドに分ける</h3>
+  <table>
+    <thead><tr><th>フィールド</th><th>意味</th><th><code>domain_scoped = false</code></th></tr></thead>
+    <tbody>
+      <tr><td class="k">domain_scope</td><td>要求した鍵。フォールバックしても <code>None</code> へ書き換えない</td><td class="k">None</td></tr>
+      <tr><td class="k">domain_fallback_applied</td><td>いずれかの方式が実際にプールへ落ちたか</td><td class="k">false</td></tr>
+    </tbody>
+  </table>
+  <p>1 つのフィールドに「要求」と「結果」を持たせると、<code>None</code> が「ドメイン限定していない」と「限定したが落ちた」の両方を意味してしまう。分ければどちらの状態も曖昧さなく復元できます。なお、どちらの方式が落ちたかは記録しません（Req 6.4 が求めていないため）。</p>
+</section>
+
+<section id="gate">
+  <h2>9. VisA 検証ゲート</h2>
+
+  <h3>実行順序</h3>
+  <ol class="steps">
+    <li><strong>実行前検証と root の解決</strong> — <code>visa_image_source()</code> は内部で <code>prepare_data()</code> を呼び、未取得なら確認なしに約 16GB のダウンロードを始めるため、<strong>検証を後段に置けない</strong>。<code>resolve_prepared_visa_root()</code> は判定と同時に「anomalib へ渡す root」を返し、guard の判定と抽出の入力が食い違わないようにする。<code>data_root</code> 自体が無ければ配置判定に入る前にエラー。</li>
+    <li><strong>実行ディレクトリの採番</strong> — <code>{category}__{backbone}</code>、既存なら <code>-2</code>, <code>-3</code>, ... の未使用最小連番。時刻を使わないので決定的で、既存結果を上書きしない。</li>
+    <li><strong>train/good の抽出</strong> — 画像ソースと抽出エンジンを組み立ててパッチ特徴を得る。</li>
+    <li><strong>二重利用</strong> — 同じ抽出結果を (a) 既知正常としてストアへ一括登録、(b) Mahalanobis 較正の入力として渡す。どちらも<strong>そのまま渡す</strong>（L2 正規化は受け手が各々行う）。</li>
+    <li><strong>coreset 再選抜 → 保存 → 復元</strong> — <code>reselect_coreset(round(coreset_rate × 登録パッチ数))</code> の後 <code>save()</code> し、<code>restore()</code> で読み直す。永続化されたバンクでスコア化することが Req 7.1 の要求。</li>
+    <li><strong>検出器の構築</strong> — <code>normal_identity</code> には登録と較正に使った <code>train/good</code> の <code>identity</code> を渡す。ストアは自身の同一性メタを公開しないため、正常分布を生成した抽出器を知っているのはこの合成ルートだけ。</li>
+    <li><strong>test 分割の各画像</strong> — 抽出 → 検出 → スコアマップと ROI を保存。</li>
+    <li><strong>指標</strong> — image-level スコアはゲート側で <code>heatmap.max()</code> として求め、port へ渡す。<code>image_level_auroc &lt; 0.9</code> なら <code>below_provisional_floor</code> を true にする（警告であって失敗ではない）。</li>
+  </ol>
+
+  <h3>配置の判定は first-match（上から順）</h3>
+  <p>複数の配置が同時に存在しても返す root が一意に決まるよう、「いずれかに一致」ではなく順序付きで定義します。</p>
+  <table>
+    <thead><tr><th>#</th><th>一致条件</th><th>返す root</th><th>書き込み</th><th>状態</th></tr></thead>
+    <tbody>
+      <tr><td class="num">1</td><td class="k">data_root/visa_pytorch/{category}</td><td class="k">data_root</td><td>不要</td><td>分割済み</td></tr>
+      <tr><td class="num">2</td><td class="k">data_root/VisA_pytorch/1cls/{category}</td><td class="k">data_root/VisA_pytorch/1cls</td><td>不要</td><td>配布元の前処理済み</td></tr>
+      <tr><td class="num">3</td><td class="k">data_root/{category}</td><td class="k">data_root</td><td><strong>必要</strong></td><td>取得済み・分割未適用</td></tr>
+      <tr><td class="num">4</td><td>いずれにも一致しない</td><td class="k">data_root</td><td><strong>必要</strong></td><td>未取得（未許可ならエラー）</td></tr>
+    </tbody>
+  </table>
+  <p>#1 を先頭にするのは anomalib 自身の判定順（<code>visa_pytorch/{category}</code> → <code>{category}</code>）に合わせ、<code>data_root</code> を渡したときに anomalib が選ぶ経路と一致させるため。#2 を #3 より先にするのは、#3 だけが複製と書き込みを伴うためです。</p>
+  <p><strong>書き込み可否を検証するのは #3 と #4</strong>。<code>apply_cls1_split()</code> は <code>data_root/visa_pytorch/</code> へ画像を複製し、<code>--category</code> を絞っても初回は 12 カテゴリ分すべてを処理します。#3 は取得済みなのでダウンロードは起きませんが、準備に書き込みが必要な状態なので Req 9.4 の対象です。#1 と #2 は読み取り専用ストレージでも回せます。</p>
+
+  <h3>CLI 引数は 5 つだけ</h3>
+  <table>
+    <thead><tr><th>引数</th><th>既定</th><th>制約</th></tr></thead>
+    <tbody>
+      <tr><td class="k">--data-root</td><td>なし（required）</td><td>既定値を持たせない（Req 8.2）</td></tr>
+      <tr><td class="k">--category</td><td class="k">pcb1</td><td>自前定数 <code>VISA_CATEGORIES</code> の 12 種を <code>choices</code> に（anomalib は import しない）</td></tr>
+      <tr><td class="k">--backbone</td><td class="k">dinov3</td><td><code>GATE_BACKBONE_PRESETS</code> のキーのみ（dinov3 / dinov2 / dino / wide_resnet50_2）</td></tr>
+      <tr><td class="k">--output-dir</td><td>—</td><td>—</td></tr>
+      <tr><td class="k">--download</td><td class="k">false</td><td><code>store_true</code>。既定で取得しない（Req 9.2）</td></tr>
+    </tbody>
+  </table>
+  <p><code>detection</code> / <code>coreset_rate</code> / <code>merge_distance_threshold</code> は CLI 引数にしない。固定値の発生源は名前付きモジュール定数 <code>GATE_DETECTION_CONFIG</code> か <code>VisaGateConfig</code> のフィールド既定値のどちらか 1 つに限る。</p>
+
+  <h3>プリセットはバックボーンとタイル設定の組</h3>
+  <p>timm のモデル名の自由入力を受け付けないのは、名前だけでは <code>feature_layer</code>・<code>feature_layout</code>・適用可能なタイルサイズが決まらないため。値は timm 1.0.28 で実測して確定しています。</p>
+  <table>
+    <thead><tr><th>キー</th><th>timm モデル名</th><th>feature_layer</th><th>layout</th><th>tile_size</th></tr></thead>
+    <tbody>
+      <tr><td class="k">dinov3</td><td class="k">vit_small_patch16_dinov3.lvd1689m</td><td class="k">blocks.11</td><td>TOKENS</td><td class="num">512</td></tr>
+      <tr><td class="k">dinov2</td><td class="k">vit_small_patch14_dinov2.lvd142m</td><td class="k">blocks.11</td><td>TOKENS</td><td class="num">518</td></tr>
+      <tr><td class="k">dino</td><td class="k">vit_small_patch16_224.dino</td><td class="k">blocks.11</td><td>TOKENS</td><td class="num">512</td></tr>
+      <tr><td class="k">wide_resnet50_2</td><td class="k">wide_resnet50_2.tv_in1k</td><td class="k">layer3</td><td>FEATURE_MAP</td><td class="num">512</td></tr>
+    </tbody>
+  </table>
+  <p>タイル設定を共通定数ではなくプリセットに持たせるのは、<code>FeatureExtractionEngine</code> が <code>tile_size % patch_stride == 0</code> を構築時に要求する一方、DINOv2 の timm 実装だけ patch 14 で <code>512 % 14 != 0</code> になるため。共通の 512 だと <code>--backbone dinov2</code> が必ず <code>ValueError</code> で落ち、逆に全体を 518 に寄せると patch 16 系が落ちます。<code>518 = 14 × 37</code>、<code>wide_resnet50_2</code> の <code>layer3</code> は reduction 16 です。</p>
+  <p>その結果 <code>dinov2</code> だけタイルサイズが揃いませんが、パッチストライドが 14 と 16 で異なる時点でパッチグリッドは揃わず、ゲート文書も「バンクサイズはパッチ数でも揃える」として差の存在を前提にしています。実値は <code>run_conditions.json</code> に残ります。</p>
+  <p>ゲート既定の <code>GATE_DETECTION_CONFIG</code> は k 近傍と Mahalanobis を等重み <code>1.0</code> で<strong>両方</strong>有効にする。ゲートの目的は 2 方式と融合経路の配線確認であり、片方だけでは検証できない経路が残るため。</p>
+
+  <h3>成果物レイアウト</h3>
+  <pre>{output_dir}/{category}__{backbone}[-N]/
+├── scores/{image_stem}.npy      スコアマップ (H, W) float32
+├── rois/{image_stem}.json       ROI 候補一覧
+├── metrics.json                 image-level AUROC と AUPRO
+├── run_conditions.json          実行条件（GateRunConditions）
+├── extractor_identity.json      抽出器同一性メタ
+└── store/                       正常メモリバンクのスナップショット</pre>
+  <p><code>image_stem</code> は <code>data_root</code> からの相対パスの <code>/</code> を <code>__</code> に置換して作る（VisA の <code>image_id</code> は絶対パスなのでそのままでは使えない）。途中失敗した実行のディレクトリは部分成果として明示的に残し、削除しない。</p>
+</section>
+
+<section id="api">
+  <h2>10. 公開 API</h2>
+
+  <h3>公開する面と公開しない面</h3>
+  <p>規則は既存 3 パッケージと同じで、<strong>engine をルートに出し、公開シグネチャに現れる型はすべて公開する</strong>。</p>
+  <table>
+    <thead><tr><th>区分</th><th>シンボル</th></tr></thead>
+    <tbody>
+      <tr><td>engine</td><td class="k">PrimaryAnomalyDetector</td></tr>
+      <tr><td>設定</td><td class="k">DetectionConfig, ScoreMethod</td></tr>
+      <tr><td>結果</td><td class="k">PrimaryDetection, RoiCandidate, ScoringProvenance</td></tr>
+      <tr><td>較正</td><td class="k">MahalanobisCalibration, MahalanobisCalibrationSet</td></tr>
+      <tr><td>port と入口</td><td class="k">NormalNeighborSearch, store_normal_neighbor_search</td></tr>
+      <tr><td>例外</td><td class="k">PrimaryDetectionError, NormalBankTooSmallError, NormalFeatureCountInsufficientError, NormalReferenceIdentityMismatchError</td></tr>
+      <tr><td>公開しない</td><td class="k">knn_scores, fuse_scores, compose_heatmap, extract_roi_candidates, l2_normalize_rows</td></tr>
+    </tbody>
+  </table>
+  <p>較正型を公開するのは <code>PrimaryAnomalyDetector.__init__</code> の引数型であり、かつ較正の生成（<code>fit</code>）を行うのが合成ルートだから。出さないと <code>visa_gate</code> が <code>primary_anomaly_detection.scoring.mahalanobis</code> を直接 import することになり、中間層のモジュールがパッケージ間契約になってしまいます。</p>
+  <p>逆にスコア関数群を公開しないのは、いずれも <code>detect()</code> が定めた順序（同一性照合 → 正規化 → スコア → 融合 → 合成 → ROI）の内側の手順であり、個別に呼べるようにすると検査順を迂回した経路ができるためです。</p>
+  <p><code>visa_gate</code> 側は <code>run_visa_gate</code>・<code>VisaGateConfig</code>・<code>VISA_CATEGORIES</code>・<code>GATE_BACKBONE_PRESETS</code>・<code>GateRunSummary</code>・<code>GateRunConditions</code>・<code>GateMetricValues</code>・<code>GateMetrics</code>・<code>VisaGateError</code> とその派生を公開します。</p>
+
+  <h3>設定と結果型</h3>
+  <pre>class ScoreMethod(StrEnum):
+    KNN = "knn"
+    MAHALANOBIS = "mahalanobis"
+
+
+class DetectionConfig(BaseModel):          # extra="forbid"
+    method_weights: Mapping[ScoreMethod, float]   # 1 件以上・各値 &gt; 0
+    neighbor_count: int = 5
+    roi_quantile: float = 0.99
+    roi_max_count: int = 16
+    domain_scoped: bool = False
+
+
+@dataclass(frozen=True)
+class RoiCandidate:
+    roi_id: int
+    top: int
+    left: int
+    height: int
+    width: int
+    representative_score: float
+
+
+@dataclass(frozen=True)
+class ScoringProvenance:
+    method_weights: tuple[tuple[ScoreMethod, float], ...]
+    neighbor_count: int | None            # KNN 有効時のみ非 None
+    normal_feature_count: int | None      # Mahalanobis 有効時のみ非 None
+    domain_scope: DomainTags | None       # 要求した鍵。フォールバックしても書き換えない
+    domain_fallback_applied: bool         # いずれかの方式がプールへ落ちたか
+    identity: ExtractorIdentity
+
+
+@dataclass(frozen=True)
+class PrimaryDetection:
+    patch_scores: np.ndarray             # (P,) float32。入力行と 1 対 1
+    heatmap: np.ndarray                  # (H, W) float32
+    roi_candidates: tuple[RoiCandidate, ...]
+    provenance: ScoringProvenance</pre>
+  <p><code>patch_scores</code> の行は入力 <code>PatchFeatureSet.embeddings</code> の行と 1 対 1 なので、パッチ位置を再掲するフィールドは持たない（呼び出し側が特徴集合を保持している）。</p>
+
+  <h3>検出器と port</h3>
+  <pre>class NormalNeighborSearch(Protocol):
+    def neighbor_distances(
+        self,
+        embedding: np.ndarray,          # (D,) float32, L2 正規化済み
+        k: int,
+        domain: DomainTags | None,      # None はプール
+        identity: ExtractorIdentity,    # 入力特徴の同一性メタ。素通しする
+    ) -&gt; tuple[tuple[float, ...], bool]: ...   # (昇順距離, フォールバックしたか)
+
+
+class PrimaryAnomalyDetector:
+    def __init__(
+        self,
+        config: DetectionConfig,
+        normal_identity: ExtractorIdentity,
+        search: NormalNeighborSearch | None = None,
+        calibrations: MahalanobisCalibrationSet | None = None,
+    ) -&gt; None: ...
+
+    def detect(self, features: PatchFeatureSet) -&gt; PrimaryDetection: ...</pre>
+  <p>構築時に「有効な方式」と「その方式が必要とする依存」の整合を検査する（<code>KNN</code> 有効なのに <code>search</code> が <code>None</code> なら構築を失敗させる）。port はストアの型（<code>NeighborHit</code>・<code>DomainCriteria</code>・<code>NormalSearchQuery</code>）を本パッケージへ持ち込まない。</p>
+
+  <h3>ゲート</h3>
+  <pre>def run_visa_gate(config: VisaGateConfig, metrics: GateMetrics) -&gt; GateRunSummary: ...
+
+
+class GateMetrics(Protocol):
+    def evaluate(
+        self,
+        image_scores: np.ndarray,                            # (M,) float32
+        image_labels: np.ndarray,                            # (M,) bool
+        score_maps: tuple[np.ndarray, ...],                  # 各 (H, W) float32
+        ground_truth_masks: tuple[np.ndarray | None, ...],   # 各 (H, W) bool または None
+    ) -&gt; GateMetricValues: ...</pre>
+  <p><code>metrics</code> を引数で受け取るので、自動テストは偽の <code>GateMetrics</code> を渡して通し実行を検証できる。<code>evaluation_framework</code> を import するのは <code>boundary/metrics_adapter.py</code> だけ。</p>
+</section>
+
+<section id="errors">
+  <h2>11. エラーの分類</h2>
+  <p>すべて例外で表現し、パッケージごとに単一の基底例外（<code>PrimaryDetectionError</code> / <code>VisaGateError</code>）を置く。エラーは原因を特定できる属性を持ち、メッセージ文字列の解析を強いない。</p>
+  <table>
+    <thead><tr><th>型</th><th>分類</th><th>送出点</th><th>Req</th></tr></thead>
+    <tbody>
+      <tr><td class="k">ValidationError</td><td>設定</td><td>pydantic の構築時検証（空の方式集合・範囲外の分位点・非正の k）</td><td class="num">3.7</td></tr>
+      <tr><td class="k">NormalBankTooSmallError</td><td>入力不足</td><td>フォールバック後の取得件数が k 未満</td><td class="num">1.3</td></tr>
+      <tr><td class="k">NormalFeatureCountInsufficientError</td><td>入力不足</td><td><code>N &lt; D+1</code> または Cholesky 失敗</td><td class="num">2.3</td></tr>
+      <tr><td class="k">NormalReferenceIdentityMismatchError</td><td>同一性</td><td><code>detect()</code> 冒頭。入力の同一性メタ vs 申告された正常参照</td><td class="num">9.5</td></tr>
+      <tr><td class="k">ExtractorIdentityMismatchError</td><td>同一性</td><td>ストア。問い合わせの同一性メタ vs ストアが保持する値（<code>patch_feature_store</code> が所有）</td><td class="num">9.5</td></tr>
+      <tr><td class="k">ValueError</td><td>退化入力</td><td><code>l2_normalize_rows()</code>。ノルム 0 の行。基底例外の対象外</td><td>—</td></tr>
+      <tr><td class="k">DatasetRootMissingError</td><td>実行前検証</td><td>データルート不在</td><td class="num">9.1</td></tr>
+      <tr><td class="k">DatasetNotPreparedError</td><td>実行前検証</td><td>未取得かつ <code>--download</code> 未指定</td><td class="num">9.3</td></tr>
+      <tr><td class="k">DatasetLocationNotWritableError</td><td>実行前検証</td><td>準備が必要だが書き込み不可</td><td class="num">9.4</td></tr>
+    </tbody>
+  </table>
+
+  <div class="accent-box">
+    <h3>同一性の判定点が 2 つある理由</h3>
+    <p style="margin:0">検出器は「入力特徴の同一性メタ」と「<strong>申告された</strong>正常参照の同一性メタ」を照合する。ストアは「問い合わせの同一性メタ」と「<strong>自身が保持する</strong>同一性メタ」を照合する。後者は、<code>normal_identity</code> の申告自体がストアの実体とずれている場合を捕まえる別の事実に対する検査であり、どちらもそのまま伝播させてスコアを 1 件も出さない。</p>
+  </div>
+
+  <p style="margin-top:14px">前提条件違反（形状・有限値・L2 ノルム 0）はストアの <code>admission</code> と同じく <code>ValueError</code> で弾き、基底例外の対象外とする。同じ事実に境界ごとに別の型を投げると呼び出し側が両方を捕捉する羽目になるため。CLI もこの <code>ValueError</code> は捕捉せず伝播させる（組み込み型を広く捕捉すると無関係な実装バグまで 1 行メッセージに畳まれ traceback が失われる）。フォールバックと ROI 該当なしは<strong>エラーではない</strong>。</p>
+</section>
+
+<section id="ownership">
+  <h2>12. 所有と非所有</h2>
+  <table>
+    <thead><tr><th>対象</th><th>所有</th></tr></thead>
+    <tbody class="own-self">
+      <tr><td>パッチ単位異常スコアの算出規則（k 近傍・Mahalanobis）と正規化規則</td><td>本 spec</td></tr>
+      <tr><td>複数方式の融合規則と、融合に用いた条件の記録</td><td>本 spec</td></tr>
+      <tr><td>パッチスコア → 画素格子ヒートマップの合成規則（重なりの扱いを含む）</td><td>本 spec</td></tr>
+      <tr><td>分位点による ROI 切り出し規則と ROI の識別子・位置範囲・代表スコア</td><td>本 spec</td></tr>
+      <tr><td>ドメイン別分布との突き合わせ経路とフォールバック判定</td><td>本 spec</td></tr>
+      <tr><td>VisA ゲートの引数解釈・実行前検証・実行順序・成果物レイアウト・条件記録</td><td>本 spec</td></tr>
+    </tbody>
+    <tbody>
+      <tr><td>正常メモリバンクの登録・集約・coreset 再選抜・剪定・永続化</td><td class="k">patch_feature_store</td></tr>
+      <tr><td>パッチ特徴・位置・同一性メタの生成、データセット読み込みと分割</td><td class="k">feature_extraction</td></tr>
+      <tr><td>image-level AUROC / AUPRO の計算実装、運用点確定、コスト感度分析</td><td class="k">evaluation_framework</td></tr>
+      <tr><td>HITL フィードバックによるスコア補正と最終判定</td><td class="k">promptable-correction-layer</td></tr>
+      <tr><td>正常メモリバンクからベクトルを読み出す新 API の追加</td><td>行わない（公開契約変更）</td></tr>
+      <tr><td>MAE ピクセル再構成誤差</td><td>将来検討</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="traceability">
+  <h2>13. 要件との対応</h2>
+  <p>design.md は 46 個の受入基準すべてに実現モジュールと判定点を対応付けている。以下は要件単位の要約。</p>
+  <table>
+    <thead><tr><th>Req</th><th>主題</th><th>主な実現先</th><th>要となる判定点</th></tr></thead>
+    <tbody>
+      <tr><td class="num">1</td><td>k 近傍距離スコア</td><td class="k">scoring/knn.py</td><td>フォールバック後の件数 &lt; k でエラー。乱数・並び依存を持たない</td></tr>
+      <tr><td class="num">2</td><td>Mahalanobis スコア</td><td class="k">scoring/mahalanobis.py</td><td>十分統計量で保持し <code>extend()</code> で再較正。<code>N &lt; D+1</code> でエラー</td></tr>
+      <tr><td class="num">3</td><td>融合と運用点</td><td class="k">scoring/fusion.py, model/config.py</td><td>次元非依存の固定写像。空の重み集合を構築時に拒否。絶対値しきい値を持たない</td></tr>
+      <tr><td class="num">4</td><td>ヒートマップ合成</td><td class="k">localization/heatmap.py</td><td><code>positions</code> から H/W 復元。重なりは算術平均で順序非依存</td></tr>
+      <tr><td class="num">5</td><td>ROI 候補</td><td class="k">localization/roi.py</td><td>分位点超過の連結成分。整列後に 1 から採番。該当なしは空タプル</td></tr>
+      <tr><td class="num">6</td><td>ドメイン別突き合わせ</td><td class="k">engine.py, boundary/, scoring/</td><td>鍵の解決は engine に 1 つ。既定はプール。除外理由に使わない。フォールバックを戻り値で伝達</td></tr>
+      <tr><td class="num">7</td><td>ゲート通し実行</td><td class="k">visa_gate/gate.py</td><td>登録 → 保存 → 復元。AUROC &lt; 0.9 で警告フラグ</td></tr>
+      <tr><td class="num">8</td><td>実行条件と成果物</td><td class="k">visa_gate/cli.py, boundary/run_artifacts.py</td><td>引数 5 つ。条件別ディレクトリ採番で上書きしない</td></tr>
+      <tr><td class="num">9</td><td>安全性と同一性</td><td class="k">boundary/dataset_guard.py, engine.py</td><td>データセットに触れる前に検証。<code>detect()</code> 冒頭で同一性照合</td></tr>
+      <tr><td class="num">10</td><td>テスト可能性</td><td class="k">visa_gate/__init__.py, tests/</td><td><code>run_visa_gate()</code> を import 可能に。データ未取得時は skip</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="contracts">
+  <h2>14. import-linter 契約</h2>
+  <ul class="tight">
+    <li><code>primary_anomaly_detection</code> 層順: <code>engine</code> → <code>boundary | scoring | localization</code> → <code>model</code></li>
+    <li><code>model</code> 内層順: <code>ports | results</code> → <code>config</code> → <code>errors | types</code></li>
+    <li><code>scoring/*</code> 相互と <code>localization/*</code> 相互、<code>visa_gate/boundary/*</code> 相互の independence</li>
+    <li><code>torch</code> / <code>timm</code> / <code>anomalib</code> / <code>faiss</code> を <code>primary_anomaly_detection</code> 全体で forbidden（<code>allow_indirect_imports = true</code> 付き）</li>
+    <li><code>patch_feature_store</code> を <code>model</code> / <code>scoring</code> / <code>localization</code> / <code>engine</code> から forbidden — ストア型に触れられるのは <code>boundary</code> だけであることを CI で強制</li>
+    <li><code>primary_anomaly_detection</code> から <code>visa_gate</code> / <code>evaluation_framework</code> / <code>correction_layer</code> を forbidden</li>
+    <li><code>correction_layer</code> / <code>feature_extraction</code> / <code>patch_feature_store</code> から新規 2 パッケージを forbidden</li>
+    <li><code>visa_gate</code> 層順: <code>cli</code> → <code>gate</code> → <code>boundary</code> → <code>model</code></li>
+  </ul>
+  <details>
+    <summary><code>allow_indirect_imports = true</code> を付ける理由</summary>
+    <div>既定は <code>false</code> で間接チェーンも違反になる。<code>boundary/store_neighbors.py</code> は <code>patch_feature_store</code> を使い、その公開 root は <code>boundary/faiss_index.py</code> を import するため、既定のままでは「ストアの公開 API を呼ぶだけ」の実装が faiss 違反として落ちる。<code>true</code> にすると直接 import だけが違反になり、「どの層も ML ライブラリを直接 import しない」という宣言を <code>boundary</code> まで含めて検査できる。既存 2 パッケージのように <code>source_modules</code> から <code>boundary</code> を除く形は採らない（本パッケージの <code>boundary</code> は ML ライブラリを必要とせず、検査対象から外す理由がない）。</div>
+  </details>
+  <details>
+    <summary><code>visa_gate</code> に ML ライブラリ contract を置かない理由</summary>
+    <div>合成ルートとして <code>faiss_flat_index</code> / <code>anomalib_coreset_selector</code> / <code>visa_image_source</code> など boundary 由来の公開ファクトリを直接呼ぶ必要があるため。ML ライブラリ隔離は各ドメインパッケージ側で担保する。</div>
+  </details>
+  <details>
+    <summary>後回しにする契約が 1 つある</summary>
+    <div><code>evaluation_framework → visa_gate</code> の逆向き禁止は、同パッケージが未実装で <code>root_packages</code> に加えられないため、<code>evaluation-framework</code> 実装時に追加する。</div>
+  </details>
+</section>
+
+<section id="tests">
+  <h2>15. テスト計画</h2>
+  <div class="bars">
+    <span>単体</span>
+    <span class="track"><span class="fill" style="width:100%"></span></span>
+    <span class="v">28</span>
+    <span>統合</span>
+    <span class="track"><span class="fill" style="width:50%"></span></span>
+    <span class="v">14</span>
+    <span>E2E</span>
+    <span class="track"><span class="fill" style="width:3.6%"></span></span>
+    <span class="v">1</span>
+  </div>
+
+  <h3>とくに意図が強いテスト</h3>
+  <ul class="tight">
+    <li><code>fit(A).extend(B)</code> と <code>fit(concat(A, B))</code> が同じ距離を返す — 再較正の定義そのものを固定する。</li>
+    <li>未正規化の <code>normal_features</code> で <code>fit</code> しても、行ごとに L2 正規化した配列と同じ平均・共分散・距離になる（かつ冪等）— 抽出器が L2 正規化しない事実に対する回帰テスト。</li>
+    <li>ドメイン指定で 0 件・プールで k 件を返す偽 port に対して、<code>NormalBankTooSmallError</code> を送出せず 2 要素目を true にする — フォールバック前の 0 件を件数不足と誤判定しないことと、伝達口が戻り値にあることを同時に固定。</li>
+    <li><code>MAHALANOBIS</code> 単独構成でノルム 0 の行を含む入力が <code>ValueError</code> になる — ストア側の検査が働かない構成でも、退化入力が nan として分位点まで流れないことを固定。空の ROI 一覧が定数ヒートマップの場合だけに限られることも併せて示す。</li>
+    <li>同一性不一致とノルム 0 の行を同時に持つ入力が <code>NormalReferenceIdentityMismatchError</code> になる — 検査順を固定する。</li>
+    <li><code>compose_heatmap</code> がパッチ入力順を入れ替えても同一結果 — 重なり配置には <code>overlap = 0</code> かつ画像サイズが <code>tile_size</code> の倍数でない端寄せ配置を含める。</li>
+    <li>偽 <code>GateMetrics</code> が <code>0.85</code> / <code>0.95</code> を返す構成で <code>below_provisional_floor</code> が切り替わる — 実データ・実重み・指標実装のいずれにも依存しない決定的テストとして置く。</li>
+    <li>k 近傍は該当あり・Mahalanobis は鍵なしの構成で、<code>domain_scope</code> が要求値のまま <code>domain_fallback_applied</code> が true になる — 2 方式の引き当てが非対称でもエラーにならず、記録の 2 フィールドが「要求」と「落ち先」を別々に表すことを固定。</li>
+    <li><code>VISA_CATEGORIES</code> が anomalib の <code>CATEGORIES</code> と一致する（<code>pytest.importorskip</code> 付き） — 写した定数が上流の実測値からずれたときに落ちる回帰点を 1 箇所に集める。</li>
+    <li><code>resolve_prepared_visa_root</code> が 1cls 配置で <code>data_root/VisA_pytorch/1cls</code> を返す — guard が認めた配置と抽出へ渡す root が食い違わないことを固定。複数配置が同時に存在するケースも置き、first-match 順が実装者判断に委ねられていないことを固定。</li>
+    <li>#3（分割未適用）で書き込み不可なら <code>DatasetLocationNotWritableError</code>、#1 / #2 では書き込み不可でも成功する — 複製が走る状態とそうでない状態の区別を固定。</li>
+    <li>各プリセットで実重みの <code>patch_stride</code> が <code>tile_size</code> を割り切り、抽出エンジンが構築できる（重み未取得なら skip） — <code>dinov2</code> の patch 14 と 518 の組み合わせが実際に通ることの確認。</li>
+    <li>公開面が 12 シンボルと一致し、スコア関数群を公開しない — <code>visa_gate</code> が中間層モジュールを直接 import しない前提を固定。</li>
+  </ul>
+
+  <h3>E2E は 3 条件が揃うときだけ実行</h3>
+  <p>VisA データが取得済み（<code>resolve_prepared_visa_root</code> がエラーを出さない）、バックボーン重みが取得可能（<code>BackboneUnavailableError</code> → skip の踏襲）、<code>evaluation_framework</code> が import 可能（<code>pytest.importorskip</code>）。欠けていれば <code>pytest.skip</code> する。実行時は暫定下限の判定を実測値に依存させず、AUROC は成果物として残すだけにする。</p>
+</section>
+
+<section id="perf">
+  <h2>16. 性能とリスク</h2>
+  <table>
+    <thead><tr><th>項目</th><th>内容</th></tr></thead>
+    <tbody>
+      <tr><td>近傍探索の回数</td><td><code>search_normal</code> は 1 クエリ 1 呼び出しで、バッチ探索の公開経路が無い。コストは「テスト画像数 × 画像あたりパッチ数」に比例する。ドメイン指定でフォールバックする構成では 1 パッチにつき最大 2 回（ゲート既定は 1 回に固定）</td></tr>
+      <tr><td>登録コスト</td><td><code>register()</code> は登録のたびに既存プロトタイプ全体への最近傍探索を行い、<code>train/good</code> の画像数 × パッチ数に対して二次的に効く。<code>merge_distance_threshold = 0.0</code> は完全一致だけを集約する設定で、登録件数を減らさない</td></tr>
+      <tr><td>共分散</td><td><code>D = 384</code> で <code>(D, D)</code> float64 は約 1.2MB。較正 1 件で約 2.4MB。十分統計量方式なので正常特徴の配列を保持し続ける必要がない</td></tr>
+    </tbody>
+  </table>
+  <div class="note">
+    <h3>未充足の依存とリスク</h3>
+    <ul>
+      <li><code>evaluation_framework</code> の image-level AUROC / AUPRO は<strong>現時点で未実装</strong>。port と <code>GateMetricValues</code> は本 spec が所有し、アダプタが詰め替える形にして待ちを切り離している。</li>
+      <li>近傍探索がパッチごとの逐次呼び出しになるため、実データ投入時の主要ボトルネック候補。バッチ探索が必要になった場合は <code>patch-feature-store</code> 側の契約追加として扱う。</li>
+      <li>較正対象はストアの現在の生存集合ではなく呼び出し側が渡した集合。coreset 再選抜や剪定の影響は較正に反映されない（ゲートでは登録直後の全件を渡すため実害なし）。</li>
+    </ul>
+  </div>
+</section>
+
+<section id="retrigger">
+  <h2>17. 再検証トリガー</h2>
+  <p>上流のこれらが変わったら、本設計を再検証する必要がある。</p>
+  <table>
+    <thead><tr><th>変化</th><th>壊れるもの</th></tr></thead>
+    <tbody>
+      <tr><td><code>positions</code> の意味（元画像座標系の <code>(top, left)</code>、タイル全面被覆）</td><td>ヒートマップの画素格子復元</td></tr>
+      <tr><td><code>NeighborHit.distance</code> の尺度（コサイン距離、範囲 <code>[0, 2]</code>）</td><td>k 近傍スコアの正規化規則</td></tr>
+      <tr><td>ストアが内部 L2 正規化をやめる、または抽出器が L2 正規化して返すようになる</td><td>較正空間・スコア空間・近傍探索空間を揃える前提</td></tr>
+      <tr><td><code>search_normal</code> のシグネチャ、または対象ドメイン不在時に空タプルを返す挙動</td><td>ドメインフォールバック判定</td></tr>
+      <tr><td><code>ExtractorIdentity</code> のフィールド構成</td><td>同一性照合と実行条件記録</td></tr>
+      <tr><td><code>tile_size % patch_stride == 0</code> 制約、またはプリセットの timm モデルの <code>patch_size</code> / <code>reduction</code></td><td>プリセットのタイルサイズが組めなくなる</td></tr>
+      <tr><td><code>DomainCriteria</code> の一致規則（空集合の軸を無指定として扱う）</td><td>2 方式のドメイン引き当ての非対称を許容した前提</td></tr>
+      <tr><td><code>GateMetrics</code> port のシグネチャ</td><td><code>evaluation-framework</code> 側の前倒し実装との整合</td></tr>
+      <tr><td><code>PrimaryDetection</code> / <code>RoiCandidate</code></td><td>下流 3 spec（LLM 構造化・補正レイヤ・評価基盤）へ波及</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<footer>
+  <p>このページは <code>.kiro/specs/primary-anomaly-detection/design.md</code> の要約であり、正典ではない。矛盾がある場合は design.md が正しい。代替案の比較・トレードオフ・Follow-up は <code>research.md</code>、受入基準の原文は <code>requirements.md</code> を参照。</p>
+</footer>
+
+</main>
+</div>
+</body>
+</html>
