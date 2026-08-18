@@ -7,9 +7,11 @@
 
 ## 現状の実装
 
-動いているのは **補正レイヤ本体（開発計画 Phase 0–3）**・**パッチ特徴抽出**・**パッチ特徴ストア** の
-3 パッケージです。一次検出・HITL／LLM 構造化・評価基盤・バージョン管理・オントロジー統合は未着手で、
-3 パッケージを通す合成ルート（パイプライン）はまだありません。
+動いているのは **補正レイヤ本体（開発計画 Phase 0–3）**・**パッチ特徴抽出**・**パッチ特徴ストア**・
+**一次異常検出**・**VisA 検証ゲート** の 5 パッケージです。HITL／LLM 構造化・評価基盤・
+バージョン管理・オントロジー統合は未着手です。抽出→ストア→一次検出を通す合成ルートは
+`visa_gate` にあり、CLI から起動できます。ただし image-level AUROC／AUPRO の計算は
+評価基盤（`evaluation-framework`）の担当で未実装のため、ゲートの通し実行はまだ完走しません。
 
 ### `src/correction_layer/` — 補正レイヤ
 
@@ -54,12 +56,49 @@
 - 仕様: `.kiro/specs/patch-feature-store/`（全タスク完了。設計要約は
   [`docs/patch-feature-store-design-overview.html`](docs/patch-feature-store-design-overview.html)）
 
+### `src/primary_anomaly_detection/` — 一次異常検出
+
+正常メモリバンクとの突き合わせでパッチ単位の異常スコアを出し、ヒートマップと ROI 候補まで作ります。
+スコア方式は k 近傍距離と Mahalanobis 距離で、重み付き融合できます。
+
+- 層: `model`／`boundary`／`scoring`／`localization`／`engine`
+- 公開 API: `PrimaryAnomalyDetector`・`DetectionConfig`・`ScoreMethod`・結果型
+  （`PrimaryDetection`／`RoiCandidate`／`ScoringProvenance`）・較正型
+  （`MahalanobisCalibration`／`MahalanobisCalibrationSet`）・`NormalNeighborSearch` port と
+  実装入口 `store_normal_neighbor_search`
+- 距離空間を揃えるため、スコア化の直前に必ず L2 正規化する。ストアの保持ベクトルも正規化済み
+- Mahalanobis の較正入力は呼び出し側が渡す。ストアは正常ベクトルの読み出しを公開しない
+- ドメイン別の突き合わせに対応。対応する分布が無ければプールへフォールバックし、
+  要求した範囲と実際に落ちたかを結果に別々に記録する
+- スコア化の前に抽出器同一性を照合し、不一致ならスコアを出さずにエラーにする
+- 仕様: `.kiro/specs/primary-anomaly-detection/`（全タスク完了。設計要約は
+  [`docs/primary-anomaly-detection-design-overview.html`](docs/primary-anomaly-detection-design-overview.html)）
+
+### `src/visa_gate/` — VisA 検証ゲート
+
+抽出・ストア・一次検出を実データで通す合成ルートです。公開データセット VisA の `train/good` を
+既知正常として登録し、`test` 分割をスコア化して成果物と指標を残します。
+
+- 層: `model`／`boundary`／`gate.py`（composition root）／`cli.py`
+- 公開 API: `run_visa_gate`・`VisaGateConfig`・`VISA_CATEGORIES`・`GATE_BACKBONE_PRESETS`・
+  結果型（`GateRunSummary`／`GateRunConditions`／`GateMetricValues`）・`GateMetrics` port・
+  エラー（`VisaGateError` と派生）
+- バックボーンはプリセットキーで選ぶ（`dinov3`／`dinov2`／`dino`／`wide_resnet50_2`）。
+  タイルサイズはパッチストライドと整合させるためプリセットが持つ
+- データセットに触れる前に検証する。ルート不在・未取得かつダウンロード未許可・書き込み不可は
+  それぞれ別のエラーで即座に止める（約 16GB の暴発ダウンロードを防ぐ）
+- 指標計算は持たない。`GateMetrics` port 越しに評価基盤へ委譲する（現状は未実装のため
+  アダプタがエラーを返し、E2E テストは skip される）
+- 起動: `mise run visa-gate -- --data-root <VisA のルート> --output-dir <出力先>`
+
 ### 検証状態
 
-- `uv run pytest` — 592 passed（`tests/`。合成 fixture 中心）
-- `PYTHONPATH=src uv run lint-imports` — 依存方向 16 契約が KEPT
+- `uv run pytest` — 751 passed, 1 skipped（`tests/`。合成 fixture 中心。skip は評価基盤未実装の
+  VisA ゲート E2E）
+- `PYTHONPATH=src uv run lint-imports` — 依存方向 26 契約が KEPT
 - CI: `.github/workflows/python-ci.yml`（ruff・`lint-imports`・pytest）
-- 次: [`docs/spec-execution-order.md`](docs/spec-execution-order.md) の順で `primary-anomaly-detection` へ
+- 次: [`docs/spec-execution-order.md`](docs/spec-execution-order.md) の順で `evaluation-framework` へ。
+  これが入ると VisA 検証ゲートが通しで完走できる
 
 ```bash
 mise run sync-dev   # 未同期の場合
@@ -131,6 +170,7 @@ echo $VIRTUAL_ENV   # .venv のパスが表示されれば有効
 | `mise run sync`        | 依存を同期（`uv sync --extra llm`）      |
 | `mise run sync-dev`    | 開発用依存も含めて同期                   |
 | `mise run gpu-check`   | PyTorch から CUDA が見えるか確認         |
+| `mise run visa-gate`   | VisA 検証ゲートを起動（引数は `--` の後）|
 | `mise run lint-md`     | Markdown を markdownlint で検査          |
 | `mise run lint-md-fix` | Markdown の自動修正可能な指摘を修正      |
 | `uv run pytest`        | テストを実行                             |
@@ -163,15 +203,27 @@ echo $VIRTUAL_ENV   # .venv のパスが表示されれば有効
 │   │   ├── boundary/         # timm/anomalib アダプタ・抽出器同一性
 │   │   ├── geometry/         # タイル配置・パッチ座標
 │   │   └── engine.py         # composition root
-│   └── patch_feature_store/  # パッチ特徴ストア（実装済み）
-│       ├── model/            # プロトタイプ・問い合わせ・設定・port
-│       ├── boundary/         # FAISS・coreset・スナップショット入出力・時刻
-│       ├── catalog/          # 台帳・受理・集約・剪定・バンク・操作履歴
-│       ├── engine.py         # composition root
-│       └── engine_snapshot.py # スナップショットの組み立てと適用
+│   ├── patch_feature_store/  # パッチ特徴ストア（実装済み）
+│   │   ├── model/            # プロトタイプ・問い合わせ・設定・port
+│   │   ├── boundary/         # FAISS・coreset・スナップショット入出力・時刻
+│   │   ├── catalog/          # 台帳・受理・集約・剪定・バンク・操作履歴
+│   │   ├── engine.py         # composition root
+│   │   └── engine_snapshot.py # スナップショットの組み立てと適用
+│   ├── primary_anomaly_detection/ # 一次異常検出（実装済み）
+│   │   ├── model/            # 設定・結果・エラー・port
+│   │   ├── boundary/         # ストアの近傍探索アダプタ
+│   │   ├── scoring/          # k 近傍・Mahalanobis・融合
+│   │   ├── localization/     # ヒートマップ合成・ROI 抽出
+│   │   └── engine.py         # composition root
+│   └── visa_gate/            # VisA 検証ゲート（実装済み）
+│       ├── model/            # ゲート設定・プリセット・結果・port
+│       ├── boundary/         # データセット検証・抽出/ストア組み立て・成果物・指標
+│       ├── gate.py           # composition root
+│       └── cli.py            # CLI 引数解釈
 ├── tests/                    # pytest（合成 fixture 含む）
 ├── scripts/
 │   ├── prepare-python.sh     # takt worktree 用の環境準備スクリプト
+│   ├── visa_gate.py          # VisA 検証ゲートの起動スクリプト
 │   └── http_server.sh        # docs/ を配信するローカル HTTP サーバ
 ├── docs/                     # 研究概要・手順・設計メモ
 ├── .github/workflows/        # python-ci / markdownlint

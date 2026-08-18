@@ -83,7 +83,13 @@ pythonpath = ["src"]
 testpaths = ["tests"]
 
 [tool.importlinter]
-root_packages = ["correction_layer", "feature_extraction", "patch_feature_store"]
+root_packages = [
+    "correction_layer",
+    "feature_extraction",
+    "patch_feature_store",
+    "primary_anomaly_detection",
+    "visa_gate",
+]
 include_external_packages = true
 
 [[tool.importlinter.contracts]]
@@ -236,3 +242,93 @@ name = "patch_feature_store は correction_layer を import しない"
 type = "forbidden"
 source_modules = ["patch_feature_store"]
 forbidden_modules = ["correction_layer"]
+
+[[tool.importlinter.contracts]]
+name = "primary_anomaly_detection の層の依存方向（外側から内側のみ）"
+type = "layers"
+layers = [
+    "primary_anomaly_detection.engine",
+    "primary_anomaly_detection.boundary | primary_anomaly_detection.scoring | primary_anomaly_detection.localization",
+    "primary_anomaly_detection.model",
+]
+
+[[tool.importlinter.contracts]]
+name = "model 内は ports／results → config → errors／types の一方向"
+type = "layers"
+layers = [
+    "primary_anomaly_detection.model.ports | primary_anomaly_detection.model.results",
+    "primary_anomaly_detection.model.config",
+    "primary_anomaly_detection.model.errors | primary_anomaly_detection.model.types",
+]
+
+[[tool.importlinter.contracts]]
+name = "scoring 内のモジュールは互いに独立（engine が合成）"
+type = "independence"
+modules = [
+    "primary_anomaly_detection.scoring.knn",
+    "primary_anomaly_detection.scoring.mahalanobis",
+    "primary_anomaly_detection.scoring.fusion",
+]
+
+[[tool.importlinter.contracts]]
+name = "localization 内のモジュールは互いに独立（engine が合成）"
+type = "independence"
+modules = [
+    "primary_anomaly_detection.localization.heatmap",
+    "primary_anomaly_detection.localization.roi",
+]
+
+[[tool.importlinter.contracts]]
+name = "primary_anomaly_detection の torch / timm / anomalib / faiss は直接 import しない"
+type = "forbidden"
+source_modules = ["primary_anomaly_detection"]
+forbidden_modules = ["torch", "timm", "anomalib", "faiss"]
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+name = "primary_anomaly_detection の model / scoring / localization / engine は patch_feature_store を import しない"
+type = "forbidden"
+source_modules = [
+    "primary_anomaly_detection.model",
+    "primary_anomaly_detection.scoring",
+    "primary_anomaly_detection.localization",
+    "primary_anomaly_detection.engine",
+]
+forbidden_modules = ["patch_feature_store"]
+
+[[tool.importlinter.contracts]]
+name = "primary_anomaly_detection は visa_gate / evaluation_framework / correction_layer を import しない"
+type = "forbidden"
+source_modules = ["primary_anomaly_detection"]
+forbidden_modules = ["visa_gate", "evaluation_framework", "correction_layer"]
+
+[[tool.importlinter.contracts]]
+name = "correction_layer / feature_extraction / patch_feature_store は primary_anomaly_detection / visa_gate を import しない"
+type = "forbidden"
+source_modules = [
+    "correction_layer",
+    "feature_extraction",
+    "patch_feature_store",
+]
+forbidden_modules = ["primary_anomaly_detection", "visa_gate"]
+
+[[tool.importlinter.contracts]]
+name = "visa_gate の層の依存方向（外側から内側のみ）"
+type = "layers"
+layers = [
+    "visa_gate.cli",
+    "visa_gate.gate",
+    "visa_gate.boundary",
+    "visa_gate.model",
+]
+
+[[tool.importlinter.contracts]]
+name = "visa_gate.boundary 内のモジュールは互いに独立（gate が合成）"
+type = "independence"
+modules = [
+    "visa_gate.boundary.dataset_guard",
+    "visa_gate.boundary.extraction_assembly",
+    "visa_gate.boundary.store_assembly",
+    "visa_gate.boundary.run_artifacts",
+    "visa_gate.boundary.metrics_adapter",
+]
